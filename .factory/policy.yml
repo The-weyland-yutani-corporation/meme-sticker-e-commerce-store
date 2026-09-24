@@ -1,0 +1,52 @@
+version: 1
+
+queue:
+  work_in_progress_limit: 2
+  max_attempts_per_issue: 3
+  max_open_factory_pull_requests: 4
+
+pull_requests:
+  title_prefix: "[factory] "
+  branch_prefix: "factory/"
+  required_labels:
+    - factory:managed
+  max_changed_files: 50
+  max_patch_kib: 2048
+
+risk:
+  low:
+    paths:
+      - "docs/**"
+      - "src/components/**"
+      - "src/app/**/*.css"
+  medium:
+    paths:
+      - "src/domain/**"
+      - "src/app/**"
+      - "tests/**"
+  high:
+    paths:
+      - "prisma/**"
+      - "src/app/api/**"
+      - "src/infrastructure/**"
+  prohibited:
+    paths:
+      - ".github/workflows/factory-*.lock.yml"
+      - ".factory/policy.yml"
+    changes:
+      - "disable-required-checks"
+      - "widen-production-credentials"
+      - "skip-stripe-signature-verification"
+      - "irreversible-database-migration"
+
+budgets:
+  max_repair_rounds: 3
+  max_agent_minutes_per_issue: 45
+  max_release_minutes: 30
+
+release:
+  canary_percentages: [5, 25, 50, 100]
+  error_rate_percent_max: 1
+  p95_latency_ms_max: 1200
+  synthetic_checkout_required: true
+  rollback_on_failed_health_gate: true

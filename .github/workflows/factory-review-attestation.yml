@@ -1,0 +1,52 @@
+name: Factory review attestation
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  invalidate:
+    name: Invalidate stale review attestations
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Remove review labels from changed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr edit "$PR_URL" \
+            --remove-label "factory:reviewed" \
+            --remove-label "factory:security-reviewed" || true
+
+  attest:
+    name: Attest bot review
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'github-actions[bot]' &&
+      contains(github.event.comment.body, 'VERDICT: PASS')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Apply correctness attestation
+        if: contains(github.event.comment.body, 'FACTORY_CORRECTNESS_REVIEW')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.issue.pull_request.html_url }}
+        run: gh pr edit "$PR_URL" --add-label "factory:reviewed"
+
+      - name: Apply security attestation
+        if: contains(github.event.comment.body, 'FACTORY_SECURITY_REVIEW')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.issue.pull_request.html_url }}
+        run: gh pr edit "$PR_URL" --add-label "factory:security-reviewed"
