@@ -1,0 +1,48 @@
+name: Factory work item
+description: A bounded work item suitable for autonomous delivery.
+title: "[factory] "
+labels:
+  - factory:ready
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the measurable user or operational result.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Provide objective, testable completion conditions.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk class
+      options:
+        - low
+        - medium
+        - high
+        - prohibited
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Allowed scope
+      description: List the files or modules that may change.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Required verification
+      description: List tests, scans, rollout signals, and rollback expectations.
+    validations:
+      required: true

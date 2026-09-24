@@ -1,0 +1,71 @@
+name: Production health controller
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-health
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify production health
+    if: ${{ vars.PRODUCTION_HEALTH_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe health endpoint
+        id: probe
+        shell: bash
+        env:
+          HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent --show-error \
+              --max-time 10 \
+              --retry 2 \
+              "${HEALTH_URL%/}/api/health" > health.json; then
+              cat health.json
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Abort active rolling release
+        if: failure()
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then
+            npx --yes vercel@latest rolling-release abort --token "$VERCEL_TOKEN"
+          else
+            echo "::warning::VERCEL_TOKEN is not configured; rollout could not be aborted."
+          fi
+
+      - name: Open or update incident issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="[factory incident] Production health check failed"
+          body="Automated production probes failed for ${HEALTH_URL}. Any active Vercel rolling release was aborted when credentials were available.
+
+          Workflow run: ${RUN_URL}
+
+          Labels: factory:incident, factory:repair"
+          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label "factory:incident,factory:repair"
+          fi
