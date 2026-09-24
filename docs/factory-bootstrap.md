@@ -5,7 +5,7 @@ credentials in implementation or review jobs.
 
 ## GitHub
 
-1. Enable Actions, Issues, auto-merge, Dependabot, secret scanning, and CodeQL.
+1. Enable Actions, Issues, auto-merge, Dependabot, and secret scanning.
 2. Install the `gh-aw` extension and compile each `.github/workflows/factory-*.md`.
 3. Commit each generated `.lock.yml`.
 4. Create a `main` ruleset that:
@@ -14,6 +14,8 @@ credentials in implementation or review jobs.
    - handles merge queue events;
    - blocks force pushes and deletion;
    - does not require human approval.
+   The included CodeQL job uses local SARIF enforcement so it also works when
+   GitHub Advanced Security is not licensed for a private repository.
 5. Create the labels referenced by `.factory/policy.yml` and the workflows.
 6. Add a narrowly scoped `GH_AW_CI_TRIGGER_TOKEN` or GitHub App credential if
    factory-created pull requests do not start CI with the default token.

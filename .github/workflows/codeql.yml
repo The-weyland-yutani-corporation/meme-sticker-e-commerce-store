@@ -11,7 +11,6 @@ on:
 permissions:
   actions: read
   contents: read
-  security-events: write
 
 jobs:
   analyze:
@@ -31,3 +30,25 @@ jobs:
         uses: github/codeql-action/analyze@1190a975f95ce23525efb6a3fc21ea29567c1b52 # v3
         with:
           category: /language:javascript-typescript
+          output: sarif-results
+          upload: never
+
+      - name: Enforce zero CodeQL findings
+        shell: bash
+        run: |
+          set -euo pipefail
+          total=0
+          files=0
+          while IFS= read -r file; do
+            files=$((files + 1))
+            count="$(jq '[.runs[].results[]?] | length' "$file")"
+            total=$((total + count))
+          done < <(find sarif-results -type f -name '*.sarif')
+          if [ "$files" -eq 0 ]; then
+            echo "::error::CodeQL did not produce a SARIF result."
+            exit 1
+          fi
+          if [ "$total" -ne 0 ]; then
+            echo "::error::CodeQL reported $total finding(s)."
+            exit 1
+          fi
