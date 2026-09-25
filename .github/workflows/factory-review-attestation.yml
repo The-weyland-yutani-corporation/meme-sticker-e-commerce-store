@@ -5,8 +5,12 @@ on:
     types: [created]
   pull_request:
     types: [synchronize]
+  schedule:
+    - cron: "4,14,24,34,44,54 * * * *"
+  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   issues: write
   pull-requests: write
@@ -28,25 +32,91 @@ jobs:
             --remove-label "factory:security-reviewed" || true
 
   attest:
-    name: Attest bot review
-    if: >-
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      github.event.comment.user.login == 'github-actions[bot]' &&
-      contains(github.event.comment.body, 'VERDICT: PASS')
+    name: Reconcile review attestations
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Apply correctness attestation
-        if: contains(github.event.comment.body, 'FACTORY_CORRECTNESS_REVIEW')
+      - name: Verify review runs match the current pull request head
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.issue.pull_request.html_url }}
-        run: gh pr edit "$PR_URL" --add-label "factory:reviewed"
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Apply security attestation
-        if: contains(github.event.comment.body, 'FACTORY_SECURITY_REVIEW')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.issue.pull_request.html_url }}
-        run: gh pr edit "$PR_URL" --add-label "factory:security-reviewed"
+          function verify_run() {
+            local run_id="$1"
+            local expected_sha="$2"
+
+            if [ -z "$run_id" ]; then
+              return 1
+            fi
+
+            local run
+            run="$(
+              gh run view "$run_id" \
+                --repo "$REPOSITORY" \
+                --json conclusion,headSha
+            )"
+
+            [ "$(jq -r '.conclusion' <<<"$run")" = "success" ] &&
+              [ "$(jq -r '.headSha' <<<"$run")" = "$expected_sha" ]
+          }
+
+          gh pr list \
+            --repo "$REPOSITORY" \
+            --state open \
+            --label "factory:managed" \
+            --limit 50 \
+            --json number,headRefOid \
+            --jq '.[] | [.number, .headRefOid] | @tsv' |
+          while IFS=$'\t' read -r pr_number head_sha; do
+            comments="$(
+              gh api \
+                --paginate \
+                --slurp \
+                "repos/$REPOSITORY/issues/$pr_number/comments"
+            )"
+
+            correctness_run="$(
+              jq -r '
+                [
+                  .[][] |
+                  select(.user.login == "github-actions[bot]") |
+                  select(
+                    (.body | contains("FACTORY_CORRECTNESS_REVIEW")) and
+                    (.body | contains("VERDICT: PASS"))
+                  ) |
+                  .body |
+                  capture("id: (?<id>[0-9]+)").id
+                ] | last // empty
+              ' <<<"$comments"
+            )"
+            security_run="$(
+              jq -r '
+                [
+                  .[][] |
+                  select(.user.login == "github-actions[bot]") |
+                  select(
+                    (.body | contains("FACTORY_SECURITY_REVIEW")) and
+                    (.body | contains("VERDICT: PASS"))
+                  ) |
+                  .body |
+                  capture("id: (?<id>[0-9]+)").id
+                ] | last // empty
+              ' <<<"$comments"
+            )"
+
+            if verify_run "$correctness_run" "$head_sha"; then
+              gh pr edit "$pr_number" \
+                --repo "$REPOSITORY" \
+                --add-label "factory:reviewed"
+            fi
+
+            if verify_run "$security_run" "$head_sha"; then
+              gh pr edit "$pr_number" \
+                --repo "$REPOSITORY" \
+                --add-label "factory:security-reviewed"
+            fi
+          done
