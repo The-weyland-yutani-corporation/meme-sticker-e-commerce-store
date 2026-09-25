@@ -1,6 +1,7 @@
 ---
 description: Convert repository signals into one bounded factory work item.
 engine: copilot
+timeout-minutes: 12
 
 on:
   workflow_dispatch:
@@ -14,7 +15,7 @@ permissions:
   copilot-requests: write
 
 tools:
-  cli-proxy: false
+  cli-proxy: true
   github:
     toolsets: [repos, issues, pull_requests, actions]
     allowed:
@@ -23,7 +24,9 @@ tools:
       - pull_request_read
       - list_pull_requests
       - get_file_contents
-  bash: false
+  bash:
+    - "github:*"
+    - "safeoutputs:*"
 
 network:
   allowed: [defaults, github]
@@ -55,4 +58,9 @@ Prefer reliability, accessibility, tests, documentation, and small customer
 experience improvements. Never propose weakening factory policy, credential
 scope, payment verification, required checks, or rollback controls.
 
-If no safe, high-confidence work is available, produce no safe output.
+Before ending, invoke exactly one safe output through the mounted CLI:
+
+- create the issue with `safeoutputs create_issue ...`; or
+- invoke `safeoutputs noop --message "No safe work available: <reason>"`.
+
+Never end with prose alone.

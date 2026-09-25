@@ -1,5 +1,49 @@
 version: 1
 
+authority:
+  implementation:
+    writable_paths:
+      - "src/**"
+      - "tests/**"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "public/**"
+      - "README.md"
+      - "package.json"
+      - "package-lock.json"
+    prohibited_paths:
+      - ".factory/**"
+      - ".github/**"
+  governance:
+    controlled_paths:
+      - ".factory/**"
+      - ".github/**"
+    required_labels:
+      - factory:managed
+      - factory:governance
+      - factory:reviewed
+      - factory:security-reviewed
+    required_checks:
+      - Validate
+      - Analyze
+    requirements:
+      - source-and-generated-lock-files-change-together
+      - independent-correctness-review
+      - independent-security-review
+      - current-head-review-attestation
+      - direct-current-head-merge
+    immutable_after_bootstrap:
+      - ".factory/policy.yml"
+      - ".github/workflows/factory-review.md"
+      - ".github/workflows/factory-review.lock.yml"
+      - ".github/workflows/factory-security-review.md"
+      - ".github/workflows/factory-security-review.lock.yml"
+      - ".github/workflows/factory-review-attestation.yml"
+    bootstrap_exception:
+      repository_variable: FACTORY_ROOT_BOOTSTRAP_SHA
+      exact_head_sha_required: true
+      reusable: false
+
 queue:
   work_in_progress_limit: 2
   max_attempts_per_issue: 3
@@ -29,10 +73,16 @@ risk:
       - "prisma/**"
       - "src/app/api/**"
       - "src/infrastructure/**"
+      - ".github/**"
+      - ".factory/**"
   prohibited:
     paths:
-      - ".github/workflows/factory-*.lock.yml"
       - ".factory/policy.yml"
+      - ".github/workflows/factory-review.md"
+      - ".github/workflows/factory-review.lock.yml"
+      - ".github/workflows/factory-security-review.md"
+      - ".github/workflows/factory-security-review.lock.yml"
+      - ".github/workflows/factory-review-attestation.yml"
     changes:
       - "disable-required-checks"
       - "widen-production-credentials"

@@ -1,0 +1,72 @@
+name: Factory queue dispatcher
+
+on:
+  issues:
+    types: [opened, labeled, reopened]
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: factory-queue-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch ready work
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start implementer only when work is ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ready_count="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --label "factory:ready" \
+              --limit 1 \
+              --json number \
+              --jq 'length'
+          )"
+          repair_count="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --label "factory:repair" \
+              --limit 1 \
+              --json number \
+              --jq 'length'
+          )"
+          active_pr_count="$(
+            gh pr list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --search "label:factory:managed -author:app/dependabot" \
+              --limit 1 \
+              --json number \
+              --jq 'length'
+          )"
+
+          if [ "$active_pr_count" -gt 0 ]; then
+            echo "Factory implementation pull request already active."
+            exit 0
+          fi
+
+          if [ "$ready_count" -eq 0 ] && [ "$repair_count" -eq 0 ]; then
+            echo "No ready or repair work."
+            exit 0
+          fi
+
+          gh workflow run factory-implement.lock.yml --repo "$REPOSITORY"

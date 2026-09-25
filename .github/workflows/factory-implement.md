@@ -1,12 +1,12 @@
 ---
 description: Implement one factory-managed issue in a constrained pull request.
 engine: copilot
+timeout-minutes: 30
 
 on:
   issues:
     types: [labeled]
   workflow_dispatch:
-  schedule: hourly
   roles: [admin, maintainer, write]
 
 permissions:
@@ -17,6 +17,7 @@ permissions:
   copilot-requests: write
 
 tools:
+  cli-proxy: true
   edit:
   bash:
     - "npm ci"
@@ -26,6 +27,8 @@ tools:
     - "npm run build"
     - "git status --short"
     - "git diff --stat"
+    - "github:*"
+    - "safeoutputs:*"
   github:
     toolsets: [repos, issues, pull_requests, actions]
     allowed:
@@ -78,3 +81,10 @@ Open one draft pull request with the issue, risk class, verification evidence,
 and rollback behavior. Do not claim a check passed unless its command completed
 successfully. If policy or file scope prevents a safe solution, do not create a
 partial patch.
+
+Before ending, invoke exactly one safe output through the mounted CLI:
+
+- create the pull request with `safeoutputs create_pull_request ...`; or
+- invoke `safeoutputs noop --message "No eligible work: <reason>"`.
+
+Never end with prose alone.
