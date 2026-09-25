@@ -32,6 +32,13 @@ authority:
       - independent-security-review
       - current-head-review-attestation
       - direct-current-head-merge
+    immutable_after_bootstrap:
+      - ".factory/policy.yml"
+      - ".github/workflows/factory-review.md"
+      - ".github/workflows/factory-review.lock.yml"
+      - ".github/workflows/factory-security-review.md"
+      - ".github/workflows/factory-security-review.lock.yml"
+      - ".github/workflows/factory-review-attestation.yml"
 
 queue:
   work_in_progress_limit: 2

@@ -9,6 +9,10 @@ on:
     - cron: "4,14,24,34,44,54 * * * *"
   workflow_dispatch:
 
+concurrency:
+  group: factory-review-attestation
+  cancel-in-progress: false
+
 permissions:
   actions: read
   contents: write
@@ -47,24 +51,77 @@ jobs:
 
           function verify_run() {
             local run_id="$1"
-            local expected_sha="$2"
-            local expected_workflow="$3"
+            local comment_id="$2"
+            local pr_number="$3"
+            local expected_sha="$4"
+            local expected_workflow="$5"
+            local expected_path="$6"
 
-            if [ -z "$run_id" ]; then
+            if [ -z "$run_id" ] || [ -z "$comment_id" ]; then
               return 1
             fi
 
             local run
             run="$(
-              gh run view "$run_id" \
-                --repo "$REPOSITORY" \
-                --json conclusion,headSha,workflowName
+              gh api "repos/$REPOSITORY/actions/runs/$run_id"
             )"
 
             [ "$(jq -r '.conclusion' <<<"$run")" = "success" ] &&
-              [ "$(jq -r '.headSha' <<<"$run")" = "$expected_sha" ] &&
-              [ "$(jq -r '.workflowName' <<<"$run")" = "$expected_workflow" ]
+              [ "$(jq -r '.head_sha' <<<"$run")" = "$expected_sha" ] &&
+              [ "$(jq -r '.name' <<<"$run")" = "$expected_workflow" ] &&
+              [ "$(jq -r '.path' <<<"$run")" = "$expected_path" ] &&
+              [ "$(jq -r '.event' <<<"$run")" = "pull_request" ] ||
+              return 1
+
+            local artifact_dir
+            artifact_dir="$(mktemp -d)"
+            if ! gh run download "$run_id" \
+              --repo "$REPOSITORY" \
+              --name "safe-outputs-items" \
+              --dir "$artifact_dir"; then
+              rm -rf "$artifact_dir"
+              return 1
+            fi
+
+            local artifact_matches=1
+            if jq -e \
+                --arg repo "$REPOSITORY" \
+                --argjson number "$pr_number" \
+                --arg suffix "#issuecomment-$comment_id" \
+                '
+                  select(
+                    .type == "add_comment" and
+                    .repo == $repo and
+                    .number == $number and
+                    (.url | endswith($suffix))
+                  )
+                ' "$artifact_dir/safe-output-items.jsonl" >/dev/null; then
+              artifact_matches=0
+            fi
+            rm -rf "$artifact_dir"
+            return "$artifact_matches"
           }
+
+          function required_checks_passed() {
+            local pr_number="$1"
+            local checks
+            if ! checks="$(
+              gh pr checks "$pr_number" \
+                --repo "$REPOSITORY" \
+                --json name,bucket
+            )"; then
+              return 1
+            fi
+
+            jq -e '
+              (map(select(.name == "Validate" and .bucket == "pass")) | length) > 0 and
+              (map(select(.name == "Analyze" and .bucket == "pass")) | length) > 0
+            ' <<<"$checks" >/dev/null
+          }
+
+          default_branch="$(
+            gh repo view "$REPOSITORY" --json defaultBranchRef --jq '.defaultBranchRef.name'
+          )"
 
           gh pr list \
             --repo "$REPOSITORY" \
@@ -78,9 +135,6 @@ jobs:
               gh pr view "$pr_number" \
                 --repo "$REPOSITORY" \
                 --json author,baseRefName,headRefName,isDraft,labels,title
-            )"
-            default_branch="$(
-              gh repo view "$REPOSITORY" --json defaultBranchRef --jq '.defaultBranchRef.name'
             )"
             author="$(jq -r '.author.login' <<<"$pr")"
             head_ref="$(jq -r '.headRefName' <<<"$pr")"
@@ -117,42 +171,66 @@ jobs:
 
             correctness_run="$(
               jq -r '
-                [
-                  .[][] |
-                  select(.user.login == "github-actions[bot]") |
-                  select(.body | contains("FACTORY_CORRECTNESS_REVIEW")) |
-                  .body
-                ] |
-                last // "" |
-                select(contains("VERDICT: PASS")) |
-                (try capture(
-                  "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
-                ).id catch empty)
+                (
+                  [
+                    .[][] |
+                    select(.user.login == "github-actions[bot]") |
+                    select(.performed_via_github_app.slug == "github-actions") |
+                    select(.created_at == .updated_at) |
+                    select(.body | contains("FACTORY_CORRECTNESS_REVIEW")) |
+                    {comment_id: (.id | tostring), body: .body}
+                  ] |
+                  last // {comment_id: "", body: ""}
+                ) as $review |
+                if ($review.body | contains("VERDICT: PASS")) then
+                  ($review.body | try capture(
+                    "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                  ).id catch "") as $run_id |
+                  {run_id: $run_id, comment_id: $review.comment_id}
+                else
+                  {run_id: "", comment_id: ""}
+                end
               ' <<<"$comments"
             )"
             security_run="$(
               jq -r '
-                [
-                  .[][] |
-                  select(.user.login == "github-actions[bot]") |
-                  select(.body | contains("FACTORY_SECURITY_REVIEW")) |
-                  .body
-                ] |
-                last // "" |
-                select(contains("VERDICT: PASS")) |
-                (try capture(
-                  "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
-                ).id catch empty)
+                (
+                  [
+                    .[][] |
+                    select(.user.login == "github-actions[bot]") |
+                    select(.performed_via_github_app.slug == "github-actions") |
+                    select(.created_at == .updated_at) |
+                    select(.body | contains("FACTORY_SECURITY_REVIEW")) |
+                    {comment_id: (.id | tostring), body: .body}
+                  ] |
+                  last // {comment_id: "", body: ""}
+                ) as $review |
+                if ($review.body | contains("VERDICT: PASS")) then
+                  ($review.body | try capture(
+                    "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                  ).id catch "") as $run_id |
+                  {run_id: $run_id, comment_id: $review.comment_id}
+                else
+                  {run_id: "", comment_id: ""}
+                end
               ' <<<"$comments"
             )"
+
+            correctness_run_id="$(jq -r '.run_id' <<<"$correctness_run")"
+            correctness_comment_id="$(jq -r '.comment_id' <<<"$correctness_run")"
+            security_run_id="$(jq -r '.run_id' <<<"$security_run")"
+            security_comment_id="$(jq -r '.comment_id' <<<"$security_run")"
 
             correctness_verified=false
             security_verified=false
 
             if verify_run \
-              "$correctness_run" \
+              "$correctness_run_id" \
+              "$correctness_comment_id" \
+              "$pr_number" \
               "$head_sha" \
-              "Independent factory reviewer"; then
+              "Independent factory reviewer" \
+              ".github/workflows/factory-review.lock.yml"; then
               correctness_verified=true
               gh pr edit "$pr_number" \
                 --repo "$REPOSITORY" \
@@ -160,9 +238,12 @@ jobs:
             fi
 
             if verify_run \
-              "$security_run" \
+              "$security_run_id" \
+              "$security_comment_id" \
+              "$pr_number" \
               "$head_sha" \
-              "Independent factory security reviewer"; then
+              "Independent factory security reviewer" \
+              ".github/workflows/factory-security-review.lock.yml"; then
               security_verified=true
               gh pr edit "$pr_number" \
                 --repo "$REPOSITORY" \
@@ -170,10 +251,11 @@ jobs:
             fi
 
             if [ "$correctness_verified" = "true" ] &&
-              [ "$security_verified" = "true" ]; then
+              [ "$security_verified" = "true" ] &&
+              required_checks_passed "$pr_number"; then
               gh pr merge "$pr_number" \
                 --repo "$REPOSITORY" \
                 --squash \
-                --match-head-commit "$head_sha" || true
+                --match-head-commit "$head_sha"
             fi
           done

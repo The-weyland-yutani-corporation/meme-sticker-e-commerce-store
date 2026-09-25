@@ -36,6 +36,11 @@ changes control-plane paths, validates both PASS comments against successful
 reviewer runs for the exact current head, and performs a direct squash merge. It
 never leaves persistent auto-merge armed across later commits.
 
+The policy, independent reviewer definitions, generated reviewer workflows, and
+attestation controller are root controls. The initial dark-factory bootstrap
+establishes them once; ordinary implementation and governance agents must not
+modify them afterward.
+
 ## Providers
 
 1. Connect the repository to Vercel.
