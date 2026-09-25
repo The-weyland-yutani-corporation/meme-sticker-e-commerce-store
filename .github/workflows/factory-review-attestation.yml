@@ -37,12 +37,18 @@ jobs:
 
   attest:
     name: Reconcile review attestations
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (
+        github.event_name != 'issue_comment' ||
+        github.event.comment.user.login == 'github-actions[bot]'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Verify review runs match the current pull request head
         env:
+          FACTORY_ROOT_BOOTSTRAP_SHA: ${{ vars.FACTORY_ROOT_BOOTSTRAP_SHA }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -159,6 +165,11 @@ jobs:
             if grep -Eq '^(\.factory/|\.github/)' <<<"$changed_files" &&
               ! jq -e '.labels[].name | select(. == "factory:governance")' \
                 <<<"$pr" >/dev/null; then
+              continue
+            fi
+            if grep -Eq '^(\.factory/policy\.yml|\.github/workflows/factory-review\.(md|lock\.yml)|\.github/workflows/factory-security-review\.(md|lock\.yml)|\.github/workflows/factory-review-attestation\.yml)$' \
+              <<<"$changed_files" &&
+              [ "$FACTORY_ROOT_BOOTSTRAP_SHA" != "$head_sha" ]; then
               continue
             fi
 

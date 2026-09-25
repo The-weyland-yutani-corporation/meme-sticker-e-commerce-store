@@ -41,6 +41,13 @@ attestation controller are root controls. The initial dark-factory bootstrap
 establishes them once; ordinary implementation and governance agents must not
 modify them afterward.
 
+To authorize that one-time root-control bootstrap without weakening steady-state
+automation, set the repository variable `FACTORY_ROOT_BOOTSTRAP_SHA` to the exact
+head commit of the bootstrap pull request. The attestation controller refuses to
+merge root-control changes at every other SHA. Delete the variable after the
+bootstrap merges; the default Actions token is not granted repository-variable
+administration.
+
 ## Providers
 
 1. Connect the repository to Vercel.

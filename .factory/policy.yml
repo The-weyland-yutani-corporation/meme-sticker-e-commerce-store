@@ -39,6 +39,10 @@ authority:
       - ".github/workflows/factory-security-review.md"
       - ".github/workflows/factory-security-review.lock.yml"
       - ".github/workflows/factory-review-attestation.yml"
+    bootstrap_exception:
+      repository_variable: FACTORY_ROOT_BOOTSTRAP_SHA
+      exact_head_sha_required: true
+      reusable: false
 
 queue:
   work_in_progress_limit: 2
@@ -72,6 +76,13 @@ risk:
       - ".github/**"
       - ".factory/**"
   prohibited:
+    paths:
+      - ".factory/policy.yml"
+      - ".github/workflows/factory-review.md"
+      - ".github/workflows/factory-review.lock.yml"
+      - ".github/workflows/factory-security-review.md"
+      - ".github/workflows/factory-security-review.lock.yml"
+      - ".github/workflows/factory-review-attestation.yml"
     changes:
       - "disable-required-checks"
       - "widen-production-credentials"
