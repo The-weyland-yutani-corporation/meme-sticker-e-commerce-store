@@ -48,6 +48,7 @@ jobs:
           function verify_run() {
             local run_id="$1"
             local expected_sha="$2"
+            local expected_workflow="$3"
 
             if [ -z "$run_id" ]; then
               return 1
@@ -57,11 +58,12 @@ jobs:
             run="$(
               gh run view "$run_id" \
                 --repo "$REPOSITORY" \
-                --json conclusion,headSha
+                --json conclusion,headSha,workflowName
             )"
 
             [ "$(jq -r '.conclusion' <<<"$run")" = "success" ] &&
-              [ "$(jq -r '.headSha' <<<"$run")" = "$expected_sha" ]
+              [ "$(jq -r '.headSha' <<<"$run")" = "$expected_sha" ] &&
+              [ "$(jq -r '.workflowName' <<<"$run")" = "$expected_workflow" ]
           }
 
           gh pr list \
@@ -89,7 +91,9 @@ jobs:
                     (.body | contains("VERDICT: PASS"))
                   ) |
                   .body |
-                  capture("id: (?<id>[0-9]+)").id
+                  (try capture(
+                    "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                  ).id catch empty)
                 ] | last // empty
               ' <<<"$comments"
             )"
@@ -103,18 +107,26 @@ jobs:
                     (.body | contains("VERDICT: PASS"))
                   ) |
                   .body |
-                  capture("id: (?<id>[0-9]+)").id
+                  (try capture(
+                    "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                  ).id catch empty)
                 ] | last // empty
               ' <<<"$comments"
             )"
 
-            if verify_run "$correctness_run" "$head_sha"; then
+            if verify_run \
+              "$correctness_run" \
+              "$head_sha" \
+              "Independent factory reviewer"; then
               gh pr edit "$pr_number" \
                 --repo "$REPOSITORY" \
                 --add-label "factory:reviewed"
             fi
 
-            if verify_run "$security_run" "$head_sha"; then
+            if verify_run \
+              "$security_run" \
+              "$head_sha" \
+              "Independent factory security reviewer"; then
               gh pr edit "$pr_number" \
                 --repo "$REPOSITORY" \
                 --add-label "factory:security-reviewed"

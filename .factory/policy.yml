@@ -1,5 +1,34 @@
 version: 1
 
+authority:
+  implementation:
+    writable_paths:
+      - "src/**"
+      - "tests/**"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "public/**"
+      - "README.md"
+      - "package.json"
+      - "package-lock.json"
+    prohibited_paths:
+      - ".factory/**"
+      - ".github/**"
+  governance:
+    required_labels:
+      - factory:managed
+      - factory:governance
+      - factory:reviewed
+      - factory:security-reviewed
+    required_checks:
+      - Validate
+      - Analyze
+    requirements:
+      - source-and-generated-lock-files-change-together
+      - independent-correctness-review
+      - independent-security-review
+      - current-head-review-attestation
+
 queue:
   work_in_progress_limit: 2
   max_attempts_per_issue: 3
@@ -29,10 +58,9 @@ risk:
       - "prisma/**"
       - "src/app/api/**"
       - "src/infrastructure/**"
+      - ".github/**"
+      - ".factory/**"
   prohibited:
-    paths:
-      - ".github/workflows/factory-*.lock.yml"
-      - ".factory/policy.yml"
     changes:
       - "disable-required-checks"
       - "widen-production-credentials"

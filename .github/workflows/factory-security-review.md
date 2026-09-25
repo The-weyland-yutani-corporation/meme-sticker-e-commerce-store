@@ -48,6 +48,12 @@ payment integrity, Stripe signature verification, idempotency, injection,
 unsafe redirects, data exposure, dependency risk, workflow permissions,
 network access, and destructive database behavior.
 
+Control-plane changes under `.github/**` or `.factory/**` are eligible only
+when the PR also carries the `factory:governance` label and satisfies the
+governance requirements in `.factory/policy.yml`. A governance agent may change
+the control plane without human approval, but the implementation agent remains
+prohibited from those paths.
+
 Post one structured comment:
 
 - begin with `FACTORY_SECURITY_REVIEW`;

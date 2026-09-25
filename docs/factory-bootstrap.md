@@ -25,6 +25,12 @@ reconciliation and invokes the AI implementer only when a ready/repair issue
 exists and no implementation PR is active. Scheduled agent runs should not be
 used as idle polling.
 
+Control-plane changes use a separate agent governance lane. They must carry the
+`factory:governance` label, update source and compiled lock files together,
+pass deterministic CI/CodeQL, and receive independent correctness and security
+PASS verdicts bound to the current head SHA. The ordinary implementation agent
+cannot edit `.github/**` or `.factory/**`.
+
 ## Providers
 
 1. Connect the repository to Vercel.

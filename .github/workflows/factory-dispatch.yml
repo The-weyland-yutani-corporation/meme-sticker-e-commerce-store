@@ -3,8 +3,6 @@ name: Factory queue dispatcher
 on:
   issues:
     types: [opened, labeled, reopened]
-  pull_request:
-    types: [closed]
   schedule:
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
