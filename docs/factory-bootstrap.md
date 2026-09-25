@@ -20,6 +20,11 @@ credentials in implementation or review jobs.
 6. Add a narrowly scoped `GH_AW_CI_TRIGGER_TOKEN` or GitHub App credential if
    factory-created pull requests do not start CI with the default token.
 
+The conventional `Factory queue dispatcher` performs a low-cost 15-minute
+reconciliation and invokes the AI implementer only when a ready/repair issue
+exists and no implementation PR is active. Scheduled agent runs should not be
+used as idle polling.
+
 ## Providers
 
 1. Connect the repository to Vercel.

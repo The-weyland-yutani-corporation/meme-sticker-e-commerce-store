@@ -23,6 +23,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - factory:managed

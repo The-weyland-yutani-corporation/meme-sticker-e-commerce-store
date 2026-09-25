@@ -56,3 +56,5 @@ experience improvements. Never propose weakening factory policy, credential
 scope, payment verification, required checks, or rollback controls.
 
 If no safe, high-confidence work is available, produce no safe output.
+Call the `noop` safe-output tool with a concise reason instead of returning
+without a safe output.

@@ -55,4 +55,6 @@ Look for:
 
 Create at most one incident issue only when there is concrete actionable drift.
 Include evidence, severity, affected items, the bounded remediation, and the
-verification needed to close it. Never propose bypassing required checks.
+verification needed to close it. Never propose bypassing required checks. If
+there is no actionable drift, call the `noop` safe-output tool with a concise
+reason.

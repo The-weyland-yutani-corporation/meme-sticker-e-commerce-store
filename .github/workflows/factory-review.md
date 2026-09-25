@@ -31,8 +31,13 @@ safe-outputs:
 
 # Independent factory reviewer
 
-Review only pull requests whose title starts with `[factory] `, whose branch
-starts with `factory/`, and which have the `factory:managed` label.
+Review pull requests with the `factory:managed` label when either:
+
+- the title starts with `[factory] ` and the branch starts with `factory/`; or
+- the author is Dependabot and the branch starts with `dependabot/`.
+
+For any other pull request, call the `noop` safe-output tool with a concise
+reason.
 
 Act as an independent correctness and security reviewer. Compare the patch to
 its linked issue and `.factory/policy.yml`. Focus on exploitable trust-boundary

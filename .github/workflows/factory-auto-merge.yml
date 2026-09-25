@@ -14,11 +14,19 @@ jobs:
     if: >-
       github.event.pull_request.draft == false &&
       github.event.pull_request.base.ref == github.event.repository.default_branch &&
-      startsWith(github.event.pull_request.head.ref, 'factory/') &&
-      startsWith(github.event.pull_request.title, '[factory] ') &&
       contains(github.event.pull_request.labels.*.name, 'factory:managed') &&
       contains(github.event.pull_request.labels.*.name, 'factory:reviewed') &&
-      contains(github.event.pull_request.labels.*.name, 'factory:security-reviewed')
+      contains(github.event.pull_request.labels.*.name, 'factory:security-reviewed') &&
+      (
+        (
+          startsWith(github.event.pull_request.head.ref, 'factory/') &&
+          startsWith(github.event.pull_request.title, '[factory] ')
+        ) ||
+        (
+          github.event.pull_request.user.login == 'dependabot[bot]' &&
+          startsWith(github.event.pull_request.head.ref, 'dependabot/')
+        )
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

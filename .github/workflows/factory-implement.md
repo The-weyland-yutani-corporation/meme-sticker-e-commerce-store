@@ -6,7 +6,6 @@ on:
   issues:
     types: [labeled]
   workflow_dispatch:
-  schedule: hourly
   roles: [admin, maintainer, write]
 
 permissions:
@@ -77,4 +76,5 @@ changes and run every permitted validation command.
 Open one draft pull request with the issue, risk class, verification evidence,
 and rollback behavior. Do not claim a check passed unless its command completed
 successfully. If policy or file scope prevents a safe solution, do not create a
-partial patch.
+partial patch. If no eligible issue exists, call the `noop` safe-output tool
+with a concise reason.
