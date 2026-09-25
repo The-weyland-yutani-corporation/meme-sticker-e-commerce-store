@@ -11,7 +11,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
 
@@ -74,6 +74,40 @@ jobs:
             --json number,headRefOid \
             --jq '.[] | [.number, .headRefOid] | @tsv' |
           while IFS=$'\t' read -r pr_number head_sha; do
+            pr="$(
+              gh pr view "$pr_number" \
+                --repo "$REPOSITORY" \
+                --json author,baseRefName,headRefName,isDraft,labels,title
+            )"
+            default_branch="$(
+              gh repo view "$REPOSITORY" --json defaultBranchRef --jq '.defaultBranchRef.name'
+            )"
+            author="$(jq -r '.author.login' <<<"$pr")"
+            head_ref="$(jq -r '.headRefName' <<<"$pr")"
+            title="$(jq -r '.title' <<<"$pr")"
+
+            if [ "$(jq -r '.isDraft' <<<"$pr")" = "true" ] ||
+              [ "$(jq -r '.baseRefName' <<<"$pr")" != "$default_branch" ]; then
+              continue
+            fi
+
+            if ! {
+              { [[ "$head_ref" == factory/* ]] && [[ "$title" == "[factory] "* ]]; } ||
+              {
+                { [ "$author" = "dependabot" ] || [ "$author" = "dependabot[bot]" ]; } &&
+                [[ "$head_ref" == dependabot/* ]]
+              }
+            }; then
+              continue
+            fi
+
+            changed_files="$(gh pr diff "$pr_number" --repo "$REPOSITORY" --name-only)"
+            if grep -Eq '^(\.factory/|\.github/)' <<<"$changed_files" &&
+              ! jq -e '.labels[].name | select(. == "factory:governance")' \
+                <<<"$pr" >/dev/null; then
+              continue
+            fi
+
             comments="$(
               gh api \
                 --paginate \
@@ -86,15 +120,14 @@ jobs:
                 [
                   .[][] |
                   select(.user.login == "github-actions[bot]") |
-                  select(
-                    (.body | contains("FACTORY_CORRECTNESS_REVIEW")) and
-                    (.body | contains("VERDICT: PASS"))
-                  ) |
-                  .body |
-                  (try capture(
-                    "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
-                  ).id catch empty)
-                ] | last // empty
+                  select(.body | contains("FACTORY_CORRECTNESS_REVIEW")) |
+                  .body
+                ] |
+                last // "" |
+                select(contains("VERDICT: PASS")) |
+                (try capture(
+                  "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                ).id catch empty)
               ' <<<"$comments"
             )"
             security_run="$(
@@ -102,22 +135,25 @@ jobs:
                 [
                   .[][] |
                   select(.user.login == "github-actions[bot]") |
-                  select(
-                    (.body | contains("FACTORY_SECURITY_REVIEW")) and
-                    (.body | contains("VERDICT: PASS"))
-                  ) |
-                  .body |
-                  (try capture(
-                    "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
-                  ).id catch empty)
-                ] | last // empty
+                  select(.body | contains("FACTORY_SECURITY_REVIEW")) |
+                  .body
+                ] |
+                last // "" |
+                select(contains("VERDICT: PASS")) |
+                (try capture(
+                  "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                ).id catch empty)
               ' <<<"$comments"
             )"
+
+            correctness_verified=false
+            security_verified=false
 
             if verify_run \
               "$correctness_run" \
               "$head_sha" \
               "Independent factory reviewer"; then
+              correctness_verified=true
               gh pr edit "$pr_number" \
                 --repo "$REPOSITORY" \
                 --add-label "factory:reviewed"
@@ -127,8 +163,17 @@ jobs:
               "$security_run" \
               "$head_sha" \
               "Independent factory security reviewer"; then
+              security_verified=true
               gh pr edit "$pr_number" \
                 --repo "$REPOSITORY" \
                 --add-label "factory:security-reviewed"
+            fi
+
+            if [ "$correctness_verified" = "true" ] &&
+              [ "$security_verified" = "true" ]; then
+              gh pr merge "$pr_number" \
+                --repo "$REPOSITORY" \
+                --squash \
+                --match-head-commit "$head_sha" || true
             fi
           done

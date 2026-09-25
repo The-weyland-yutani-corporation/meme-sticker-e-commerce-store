@@ -1,7 +1,7 @@
 ---
 description: Independently security-review factory pull requests.
 engine: copilot
-timeout-minutes: 12
+timeout-minutes: 20
 
 on:
   pull_request:
@@ -68,6 +68,9 @@ and merge authority.
 
 Do not spend time probing the environment or invoking undeclared tools. Use the
 mounted `github` CLI for reads. Before ending, invoke exactly one safe output:
+The safe-output quota is one for the entire run: never call `safeoutputs` to
+test syntax or post a placeholder. Prepare the complete final body first, then
+make the single call.
 
 - `safeoutputs add_comment --item_number <pull-request-number> --body "<review>"`;
   or

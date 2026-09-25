@@ -15,6 +15,9 @@ authority:
       - ".factory/**"
       - ".github/**"
   governance:
+    controlled_paths:
+      - ".factory/**"
+      - ".github/**"
     required_labels:
       - factory:managed
       - factory:governance
@@ -28,6 +31,7 @@ authority:
       - independent-correctness-review
       - independent-security-review
       - current-head-review-attestation
+      - direct-current-head-merge
 
 queue:
   work_in_progress_limit: 2

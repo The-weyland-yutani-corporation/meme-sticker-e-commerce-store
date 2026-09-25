@@ -5,7 +5,7 @@ credentials in implementation or review jobs.
 
 ## GitHub
 
-1. Enable Actions, Issues, auto-merge, Dependabot, and secret scanning.
+1. Enable Actions, Issues, Dependabot, and secret scanning.
 2. Install the `gh-aw` extension and compile each `.github/workflows/factory-*.md`.
 3. Commit each generated `.lock.yml`.
 4. Create a `main` ruleset that:
@@ -30,6 +30,11 @@ Control-plane changes use a separate agent governance lane. They must carry the
 pass deterministic CI/CodeQL, and receive independent correctness and security
 PASS verdicts bound to the current head SHA. The ordinary implementation agent
 cannot edit `.github/**` or `.factory/**`.
+
+The attestation reconciler enforces `factory:governance` whenever a pull request
+changes control-plane paths, validates both PASS comments against successful
+reviewer runs for the exact current head, and performs a direct squash merge. It
+never leaves persistent auto-merge armed across later commits.
 
 ## Providers
 

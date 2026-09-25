@@ -45,7 +45,7 @@ order transitions, making retries idempotent.
 GitHub Issues are the durable queue. GitHub Agentic Workflows create bounded
 issues and pull requests using read-only agent jobs plus SafeOutputs.
 Conventional Actions perform deterministic CI and enable GitHub-native
-auto-merge only for factory-provenance PRs. Branch protection and required
+direct merge only for factory-provenance PRs with current-head attestations. Branch protection and required
 checks remain the authority.
 
 The policy in `.factory/policy.yml` defines WIP, retry, diff, risk, and rollout
