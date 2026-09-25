@@ -1,6 +1,7 @@
 ---
 description: Audit the dark factory for stalled work and policy drift.
 engine: copilot
+timeout-minutes: 12
 
 on:
   workflow_dispatch:
@@ -14,7 +15,7 @@ permissions:
   copilot-requests: write
 
 tools:
-  cli-proxy: false
+  cli-proxy: true
   github:
     toolsets: [repos, issues, pull_requests, actions]
     allowed:
@@ -23,7 +24,9 @@ tools:
       - issue_read
       - list_pull_requests
       - pull_request_read
-  bash: false
+  bash:
+    - "github:*"
+    - "safeoutputs:*"
 
 network:
   allowed: [defaults, github]
@@ -55,6 +58,11 @@ Look for:
 
 Create at most one incident issue only when there is concrete actionable drift.
 Include evidence, severity, affected items, the bounded remediation, and the
-verification needed to close it. Never propose bypassing required checks. If
-there is no actionable drift, call the `noop` safe-output tool with a concise
-reason.
+verification needed to close it. Never propose bypassing required checks.
+
+Before ending, invoke exactly one safe output through the mounted CLI:
+
+- create the incident with `safeoutputs create_issue ...`; or
+- invoke `safeoutputs noop --message "No actionable drift: <reason>"`.
+
+Never end with prose alone.

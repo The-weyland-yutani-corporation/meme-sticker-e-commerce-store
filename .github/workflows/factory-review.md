@@ -1,6 +1,7 @@
 ---
 description: Independently review factory pull requests and report findings.
 engine: copilot
+timeout-minutes: 12
 
 on:
   pull_request:
@@ -13,13 +14,15 @@ permissions:
   copilot-requests: write
 
 tools:
-  cli-proxy: false
+  cli-proxy: true
   github:
     toolsets: [repos, pull_requests, actions]
     allowed:
       - pull_request_read
       - get_file_contents
-  bash: false
+  bash:
+    - "github:*"
+    - "safeoutputs:*"
 
 network:
   allowed: [defaults, github]
@@ -36,8 +39,7 @@ Review pull requests with the `factory:managed` label when either:
 - the title starts with `[factory] ` and the branch starts with `factory/`; or
 - the author is Dependabot and the branch starts with `dependabot/`.
 
-For any other pull request, call the `noop` safe-output tool with a concise
-reason.
+For any other pull request, emit a noop with a concise reason.
 
 Act as an independent correctness and security reviewer. Compare the patch to
 its linked issue and `.factory/policy.yml`. Focus on exploitable trust-boundary
@@ -59,3 +61,12 @@ Post one structured comment:
 
 This workflow reports evidence only. A separate deterministic controller owns
 labels and merge authority.
+
+Do not spend time probing the environment or invoking undeclared tools. Use the
+mounted `github` CLI for reads. Before ending, invoke exactly one safe output:
+
+- `safeoutputs add_comment --item_number <pull-request-number> --body "<review>"`;
+  or
+- `safeoutputs noop --message "Review not applicable: <reason>"`.
+
+Never end with prose alone.
