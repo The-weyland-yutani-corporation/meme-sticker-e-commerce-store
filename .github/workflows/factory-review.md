@@ -29,7 +29,7 @@ network:
 
 safe-outputs:
   add-comment:
-    max: 1
+    max: 2
 ---
 
 # Independent factory reviewer
@@ -67,9 +67,12 @@ labels and merge authority.
 
 Do not spend time probing the environment or invoking undeclared tools. Use the
 mounted `github` CLI for reads. Before ending, invoke exactly one safe output:
-The safe-output quota is one for the entire run: never call `safeoutputs` to
-test syntax or post a placeholder. Prepare the complete final body first, then
-make the single call.
+The expected output is one final comment: never call `safeoutputs` to test
+syntax or post a placeholder. Prepare the complete final body first, then make
+the single call.
+If you accidentally consume one comment slot despite this instruction, you
+must still post the complete structured review with the second and final slot.
+Do not emit `report_incomplete` while a comment slot remains.
 
 - `safeoutputs add_comment --item_number <pull-request-number> --body "<review>"`;
   or
