@@ -8,6 +8,7 @@ on:
     types: [completed]
 
 permissions:
+  actions: read
   contents: read
   issues: write
   pull-requests: read
@@ -67,6 +68,28 @@ jobs:
                   --remove-label "factory:active" || true
               fi
             done < <(linked_issues "$pr_number")
+            exit 0
+          fi
+
+          active_run_count="$(
+            gh run list \
+              --repo "$REPOSITORY" \
+              --workflow "factory-implement.lock.yml" \
+              --limit 20 \
+              --json status \
+              --jq '[
+                .[] |
+                select(
+                  .status == "queued" or
+                  .status == "in_progress" or
+                  .status == "waiting" or
+                  .status == "requested" or
+                  .status == "pending"
+                )
+              ] | length'
+          )"
+          if [ "$active_run_count" -gt 0 ]; then
+            echo "Another implementer run is active; deferring issue cleanup."
             exit 0
           fi
 
