@@ -208,6 +208,16 @@ jobs:
             --repo "$REPOSITORY" \
             --add-label "factory:active"
 
+          attempt_comment_id="$(
+            gh api \
+              --method POST \
+              "repos/$REPOSITORY/issues/$issue_number/comments" \
+              -f body="Implementation attempt $next_attempt of $max_attempts dispatched as @$dispatch_actor.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->" \
+              --jq '.id'
+          )"
+
           if ! GH_TOKEN="$DISPATCH_TOKEN" gh workflow run \
             "factory-implement.lock.yml" \
             --repo "$REPOSITORY" \
@@ -215,11 +225,8 @@ jobs:
             gh issue edit "$issue_number" \
               --repo "$REPOSITORY" \
               --remove-label "factory:active"
+            gh api \
+              --method DELETE \
+              "repos/$REPOSITORY/issues/comments/$attempt_comment_id"
             exit 1
           fi
-
-          gh issue comment "$issue_number" \
-            --repo "$REPOSITORY" \
-            --body "Implementation attempt $next_attempt of $max_attempts dispatched as @$dispatch_actor.
-
-          <!-- FACTORY_IMPLEMENT_ATTEMPT -->"
