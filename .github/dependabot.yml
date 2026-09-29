@@ -23,6 +23,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: github/gh-aw-actions/setup
+        versions:
+          - 0.89.17
     groups:
       github-actions:
         patterns:

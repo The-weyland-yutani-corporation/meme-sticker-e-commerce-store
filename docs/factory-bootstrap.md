@@ -17,13 +17,22 @@ credentials in implementation or review jobs.
    The included CodeQL job uses local SARIF enforcement so it also works when
    GitHub Advanced Security is not licensed for a private repository.
 5. Create the labels referenced by `.factory/policy.yml` and the workflows.
-6. Add a narrowly scoped `GH_AW_CI_TRIGGER_TOKEN` or GitHub App credential if
-   factory-created pull requests do not start CI with the default token.
+6. Create a repository-scoped fine-grained PAT owned by a repository owner,
+   grant the minimum Actions dispatch access, and store it as
+   `GH_AW_CI_TRIGGER_TOKEN`. Scheduled dispatches use this identity so `gh-aw`
+   can verify the implementer's required repository role; the default Actions
+   token authenticates as `github-actions[bot]` and is rejected by that gate.
 
 The conventional `Factory queue dispatcher` performs a low-cost 15-minute
 reconciliation and invokes the AI implementer only when a ready/repair issue
-exists and no implementation PR is active. Scheduled agent runs should not be
-used as idle polling.
+exists, the WIP limit allows it, and no implementer is already active. It passes
+the selected issue through `aw_context`, records bounded attempts, and does not
+use scheduled agent runs as idle polling.
+
+Implementation pull requests are opened ready for review and link their issue
+with a closing keyword. The lifecycle controller releases failed/no-output runs
+for another bounded attempt, while the review repair bridge closes rejected PRs
+and returns their linked issues to `factory:repair`.
 
 Control-plane changes use a separate agent governance lane. They must carry the
 `factory:governance` label, update source and compiled lock files together,
