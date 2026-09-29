@@ -22,6 +22,8 @@ credentials in implementation or review jobs.
    `DARK_FACTORY_MAGE_APP_ID`. The dispatcher mints a short-lived token scoped
    to this repository with only Actions write permission. The App client secret
    is not used by Actions.
+   Treat private-key compromise as a control-plane incident and rotate the key
+   immediately because the App installation may hold broader future permissions.
 
 The conventional `Factory queue dispatcher` performs a low-cost 15-minute
 reconciliation and invokes the AI implementer only when a ready/repair issue
