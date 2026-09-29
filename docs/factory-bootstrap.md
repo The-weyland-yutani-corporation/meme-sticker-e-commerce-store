@@ -57,6 +57,34 @@ merge root-control changes at every other SHA. Delete the variable after the
 bootstrap merges; the default Actions token is not granted repository-variable
 administration.
 
+The conventional `Factory queue dispatcher` performs a low-cost 15-minute
+reconciliation and invokes the AI implementer only when a ready/repair issue
+exists and no implementation PR is active. Scheduled agent runs should not be
+used as idle polling.
+
+Control-plane changes use a separate agent governance lane. They must carry the
+`factory:governance` label, update source and compiled lock files together,
+pass deterministic CI/CodeQL, and receive independent correctness and security
+PASS verdicts bound to the current head SHA. The ordinary implementation agent
+cannot edit `.github/**` or `.factory/**`.
+
+The attestation reconciler enforces `factory:governance` whenever a pull request
+changes control-plane paths, validates both PASS comments against successful
+reviewer runs for the exact current head, and performs a direct squash merge. It
+never leaves persistent auto-merge armed across later commits.
+
+The policy, independent reviewer definitions, generated reviewer workflows, and
+attestation controller are root controls. The initial dark-factory bootstrap
+establishes them once; ordinary implementation and governance agents must not
+modify them afterward.
+
+To authorize that one-time root-control bootstrap without weakening steady-state
+automation, set the repository variable `FACTORY_ROOT_BOOTSTRAP_SHA` to the exact
+head commit of the bootstrap pull request. The attestation controller refuses to
+merge root-control changes at every other SHA. Delete the variable after the
+bootstrap merges; the default Actions token is not granted repository-variable
+administration.
+
 ## Providers
 
 1. Connect the repository to Vercel.
