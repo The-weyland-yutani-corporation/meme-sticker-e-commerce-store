@@ -23,9 +23,53 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Verify GitHub App configuration
+        env:
+          APP_ID: ${{ vars.DARK_FACTORY_MAGE_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.DARK_FACTORY_MAGE_APP_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+            exit 0
+          fi
+
+          title="[factory dispatch] Missing GitHub App configuration"
+          existing="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --search "$title in:title" \
+              --limit 1 \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [ -z "$existing" ]; then
+            gh issue create \
+              --repo "$REPOSITORY" \
+              --title "$title" \
+              --body "Set DARK_FACTORY_MAGE_APP_ID and expose DARK_FACTORY_MAGE_APP_PRIVATE_KEY to this repository before autonomous dispatch can run." \
+              --label "factory:incident"
+          fi
+          exit 1
+
+      - name: Mint repository-scoped dispatcher token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.DARK_FACTORY_MAGE_APP_ID }}
+          private-key: ${{ secrets.DARK_FACTORY_MAGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+
       - name: Start implementer only when work is ready
         env:
-          DISPATCH_TOKEN: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN }}
+          DISPATCH_ACTOR: ${{ steps.app-token.outputs.app-slug }}[bot]
+          DISPATCH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -172,31 +216,6 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$DISPATCH_TOKEN" ]; then
-            upsert_incident \
-              "[factory dispatch] Missing trigger credential" \
-              "The queue has eligible work, but GH_AW_CI_TRIGGER_TOKEN is not configured. The default Actions token dispatches as github-actions[bot], which fails the implementer's gh-aw role gate."
-            exit 1
-          fi
-
-          dispatch_actor="$(
-            GH_TOKEN="$DISPATCH_TOKEN" gh api user --jq '.login'
-          )"
-          dispatch_permission="$(
-            GH_TOKEN="$DISPATCH_TOKEN" gh api \
-              "repos/$REPOSITORY/collaborators/$dispatch_actor/permission" \
-              --jq '.permission'
-          )"
-          case "$dispatch_permission" in
-            admin|maintain|write) ;;
-            *)
-              upsert_incident \
-                "[factory dispatch] Trigger credential lacks write access" \
-                "GH_AW_CI_TRIGGER_TOKEN authenticates as $dispatch_actor with repository permission '$dispatch_permission'. The implementer requires write, maintain, or admin."
-              exit 1
-              ;;
-          esac
-
           next_attempt="$((attempt_count + 1))"
           aw_context="$(
             jq -cn \
@@ -208,6 +227,16 @@ jobs:
             --repo "$REPOSITORY" \
             --add-label "factory:active"
 
+          attempt_comment_id="$(
+            gh api \
+              --method POST \
+              "repos/$REPOSITORY/issues/$issue_number/comments" \
+              -f body="Implementation attempt $next_attempt of $max_attempts dispatched as @$DISPATCH_ACTOR.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->" \
+              --jq '.id'
+          )"
+
           if ! GH_TOKEN="$DISPATCH_TOKEN" gh workflow run \
             "factory-implement.lock.yml" \
             --repo "$REPOSITORY" \
@@ -215,11 +244,8 @@ jobs:
             gh issue edit "$issue_number" \
               --repo "$REPOSITORY" \
               --remove-label "factory:active"
+            gh api \
+              --method DELETE \
+              "repos/$REPOSITORY/issues/comments/$attempt_comment_id"
             exit 1
           fi
-
-          gh issue comment "$issue_number" \
-            --repo "$REPOSITORY" \
-            --body "Implementation attempt $next_attempt of $max_attempts dispatched as @$dispatch_actor.
-
-          <!-- FACTORY_IMPLEMENT_ATTEMPT -->"
