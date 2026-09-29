@@ -1,0 +1,195 @@
+name: Factory review repair bridge
+
+on:
+  schedule:
+    - cron: "9,19,29,39,49,59 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: factory-review-repair
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Return rejected work to repair queue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Reconcile current-head review failures
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          function verify_review_run() {
+            local run_id="$1"
+            local comment_id="$2"
+            local pr_number="$3"
+            local expected_sha="$4"
+            local expected_name="$5"
+            local expected_path="$6"
+
+            [ -n "$run_id" ] && [ -n "$comment_id" ] || return 1
+            run="$(gh api "repos/$REPOSITORY/actions/runs/$run_id")"
+            [ "$(jq -r '.conclusion' <<<"$run")" = "success" ] &&
+              [ "$(jq -r '.head_sha' <<<"$run")" = "$expected_sha" ] &&
+              [ "$(jq -r '.name' <<<"$run")" = "$expected_name" ] &&
+              [ "$(jq -r '.path' <<<"$run")" = "$expected_path" ] &&
+              [ "$(jq -r '.event' <<<"$run")" = "pull_request" ] ||
+              return 1
+
+            artifact_dir="$(mktemp -d)"
+            if ! gh run download "$run_id" \
+              --repo "$REPOSITORY" \
+              --name "safe-outputs-items" \
+              --dir "$artifact_dir"; then
+              rm -rf "$artifact_dir"
+              return 1
+            fi
+
+            artifact_matches=1
+            if jq -e \
+                --arg repo "$REPOSITORY" \
+                --argjson number "$pr_number" \
+                --arg suffix "#issuecomment-$comment_id" \
+                '
+                  select(
+                    .type == "add_comment" and
+                    .repo == $repo and
+                    .number == $number and
+                    (.url | endswith($suffix))
+                  )
+                ' "$artifact_dir/safe-output-items.jsonl" >/dev/null; then
+              artifact_matches=0
+            fi
+            rm -rf "$artifact_dir"
+            return "$artifact_matches"
+          }
+
+          gh pr list \
+            --repo "$REPOSITORY" \
+            --state open \
+            --label "factory:managed" \
+            --limit 100 \
+            --json number,headRefOid \
+            --jq '.[] | [.number, .headRefOid] | @tsv' |
+          while IFS=$'\t' read -r pr_number head_sha; do
+            comments="$(
+              gh api \
+                --paginate \
+                --slurp \
+                "repos/$REPOSITORY/issues/$pr_number/comments"
+            )"
+
+            correctness="$(
+              jq -c '
+                [
+                  .[][] |
+                  select(.user.login == "github-actions[bot]") |
+                  select(.performed_via_github_app.slug == "github-actions") |
+                  select(.created_at == .updated_at) |
+                  select(.body | contains("FACTORY_CORRECTNESS_REVIEW")) |
+                  {
+                    body,
+                    comment_id: (.id | tostring),
+                    url: .html_url,
+                    run_id: (
+                      try (
+                        .body |
+                        capture(
+                          "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                        ).id
+                      ) catch ""
+                    )
+                  }
+                ] | last // {body:"", comment_id:"", url:"", run_id:""}
+              ' <<<"$comments"
+            )"
+            security="$(
+              jq -c '
+                [
+                  .[][] |
+                  select(.user.login == "github-actions[bot]") |
+                  select(.performed_via_github_app.slug == "github-actions") |
+                  select(.created_at == .updated_at) |
+                  select(.body | contains("FACTORY_SECURITY_REVIEW")) |
+                  {
+                    body,
+                    comment_id: (.id | tostring),
+                    url: .html_url,
+                    run_id: (
+                      try (
+                        .body |
+                        capture(
+                          "gh-aw-agentic-workflow: [^,]+, engine: [^,]+, model: [^,]+, id: (?<id>[0-9]+),"
+                        ).id
+                      ) catch ""
+                    )
+                  }
+                ] | last // {body:"", comment_id:"", url:"", run_id:""}
+              ' <<<"$comments"
+            )"
+
+            failure_urls=()
+            if jq -e '.body | contains("VERDICT: CHANGES_REQUIRED")' \
+              <<<"$correctness" >/dev/null &&
+              verify_review_run \
+                "$(jq -r '.run_id' <<<"$correctness")" \
+                "$(jq -r '.comment_id' <<<"$correctness")" \
+                "$pr_number" \
+                "$head_sha" \
+                "Independent factory reviewer" \
+                ".github/workflows/factory-review.lock.yml"; then
+              failure_urls+=("$(jq -r '.url' <<<"$correctness")")
+            fi
+            if jq -e '.body | contains("VERDICT: CHANGES_REQUIRED")' \
+              <<<"$security" >/dev/null &&
+              verify_review_run \
+                "$(jq -r '.run_id' <<<"$security")" \
+                "$(jq -r '.comment_id' <<<"$security")" \
+                "$pr_number" \
+                "$head_sha" \
+                "Independent factory security reviewer" \
+                ".github/workflows/factory-security-review.lock.yml"; then
+              failure_urls+=("$(jq -r '.url' <<<"$security")")
+            fi
+            [ "${#failure_urls[@]}" -gt 0 ] || continue
+
+            issue_numbers="$(
+              gh pr view "$pr_number" \
+                --repo "$REPOSITORY" \
+                --json closingIssuesReferences \
+                --jq '.closingIssuesReferences[].number'
+            )"
+            [ -n "$issue_numbers" ] || continue
+
+            findings="$(
+              printf -- "- %s\n" "${failure_urls[@]}"
+            )"
+            while read -r issue_number; do
+              [ -n "$issue_number" ] || continue
+              gh issue comment "$issue_number" \
+                --repo "$REPOSITORY" \
+                --body "Factory PR #$pr_number requires a replacement implementation for the current reviewed head.
+
+          Verified review findings:
+          $findings"
+              gh issue edit "$issue_number" \
+                --repo "$REPOSITORY" \
+                --remove-label "factory:active" \
+                --remove-label "factory:ready" \
+                --add-label "factory:repair"
+            done <<<"$issue_numbers"
+
+            gh pr close "$pr_number" \
+              --repo "$REPOSITORY" \
+              --comment "Closed by the factory repair bridge after verified current-head CHANGES_REQUIRED verdicts. Linked work has returned to the bounded repair queue."
+          done

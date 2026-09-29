@@ -17,8 +17,45 @@ credentials in implementation or review jobs.
    The included CodeQL job uses local SARIF enforcement so it also works when
    GitHub Advanced Security is not licensed for a private repository.
 5. Create the labels referenced by `.factory/policy.yml` and the workflows.
-6. Add a narrowly scoped `GH_AW_CI_TRIGGER_TOKEN` or GitHub App credential if
-   factory-created pull requests do not start CI with the default token.
+6. Create a repository-scoped fine-grained PAT owned by a repository owner,
+   grant the minimum Actions dispatch access, and store it as
+   `GH_AW_CI_TRIGGER_TOKEN`. Scheduled dispatches use this identity so `gh-aw`
+   can verify the implementer's required repository role; the default Actions
+   token authenticates as `github-actions[bot]` and is rejected by that gate.
+
+The conventional `Factory queue dispatcher` performs a low-cost 15-minute
+reconciliation and invokes the AI implementer only when a ready/repair issue
+exists, the WIP limit allows it, and no implementer is already active. It passes
+the selected issue through `aw_context`, records bounded attempts, and does not
+use scheduled agent runs as idle polling.
+
+Implementation pull requests are opened ready for review and link their issue
+with a closing keyword. The lifecycle controller releases failed/no-output runs
+for another bounded attempt, while the review repair bridge closes rejected PRs
+and returns their linked issues to `factory:repair`.
+
+Control-plane changes use a separate agent governance lane. They must carry the
+`factory:governance` label, update source and compiled lock files together,
+pass deterministic CI/CodeQL, and receive independent correctness and security
+PASS verdicts bound to the current head SHA. The ordinary implementation agent
+cannot edit `.github/**` or `.factory/**`.
+
+The attestation reconciler enforces `factory:governance` whenever a pull request
+changes control-plane paths, validates both PASS comments against successful
+reviewer runs for the exact current head, and performs a direct squash merge. It
+never leaves persistent auto-merge armed across later commits.
+
+The policy, independent reviewer definitions, generated reviewer workflows, and
+attestation controller are root controls. The initial dark-factory bootstrap
+establishes them once; ordinary implementation and governance agents must not
+modify them afterward.
+
+To authorize that one-time root-control bootstrap without weakening steady-state
+automation, set the repository variable `FACTORY_ROOT_BOOTSTRAP_SHA` to the exact
+head commit of the bootstrap pull request. The attestation controller refuses to
+merge root-control changes at every other SHA. Delete the variable after the
+bootstrap merges; the default Actions token is not granted repository-variable
+administration.
 
 The conventional `Factory queue dispatcher` performs a low-cost 15-minute
 reconciliation and invokes the AI implementer only when a ready/repair issue

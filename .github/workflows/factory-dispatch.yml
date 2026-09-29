@@ -10,7 +10,7 @@ on:
 permissions:
   actions: write
   contents: read
-  issues: read
+  issues: write
   pull-requests: read
 
 concurrency:
@@ -25,48 +25,201 @@ jobs:
     steps:
       - name: Start implementer only when work is ready
         env:
+          DISPATCH_TOKEN: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
 
-          ready_count="$(
-            gh issue list \
+          function upsert_incident() {
+            local title="$1"
+            local body="$2"
+            local existing
+            existing="$(
+              gh issue list \
+                --repo "$REPOSITORY" \
+                --state open \
+                --search "$title in:title" \
+                --limit 1 \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+            if [ -n "$existing" ]; then
+              echo "Incident #$existing already records: $title"
+            else
+              gh issue create \
+                --repo "$REPOSITORY" \
+                --title "$title" \
+                --body "$body" \
+                --label "factory:incident"
+            fi
+          }
+
+          active_run_count="$(
+            gh run list \
               --repo "$REPOSITORY" \
-              --state open \
-              --label "factory:ready" \
-              --limit 1 \
-              --json number \
-              --jq 'length'
+              --workflow "factory-implement.lock.yml" \
+              --limit 20 \
+              --json status \
+              --jq '[
+                .[] |
+                select(
+                  .status == "queued" or
+                  .status == "in_progress" or
+                  .status == "waiting" or
+                  .status == "requested" or
+                  .status == "pending"
+                )
+              ] | length'
           )"
-          repair_count="$(
-            gh issue list \
-              --repo "$REPOSITORY" \
-              --state open \
-              --label "factory:repair" \
-              --limit 1 \
-              --json number \
-              --jq 'length'
+          if [ "$active_run_count" -gt 0 ]; then
+            echo "Factory implementer is already queued or running."
+            exit 0
+          fi
+
+          policy="$(
+            gh api "repos/$REPOSITORY/contents/.factory/policy.yml" \
+              --jq '.content' |
+            base64 --decode
           )"
+          wip_limit="$(
+            awk '
+              /^queue:/ { in_queue=1; next }
+              in_queue && /^[^ ]/ { in_queue=0 }
+              in_queue && /work_in_progress_limit:/ { print $2; exit }
+            ' <<<"$policy"
+          )"
+          max_attempts="$(
+            awk '
+              /^queue:/ { in_queue=1; next }
+              in_queue && /^[^ ]/ { in_queue=0 }
+              in_queue && /max_attempts_per_issue:/ { print $2; exit }
+            ' <<<"$policy"
+          )"
+          : "${wip_limit:?Missing queue.work_in_progress_limit}"
+          : "${max_attempts:?Missing queue.max_attempts_per_issue}"
+
           active_pr_count="$(
             gh pr list \
               --repo "$REPOSITORY" \
               --state open \
               --search "label:factory:managed -author:app/dependabot" \
-              --limit 1 \
+              --limit 100 \
               --json number \
               --jq 'length'
           )"
-
-          if [ "$active_pr_count" -gt 0 ]; then
-            echo "Factory implementation pull request already active."
+          if [ "$active_pr_count" -ge "$wip_limit" ]; then
+            echo "Factory WIP limit reached: $active_pr_count/$wip_limit."
             exit 0
           fi
 
-          if [ "$ready_count" -eq 0 ] && [ "$repair_count" -eq 0 ]; then
+          function select_issue() {
+            local label="$1"
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --label "$label" \
+              --limit 100 \
+              --json number,createdAt,labels \
+              --jq '
+                [
+                  .[] |
+                  select(
+                    ([.labels[].name] | index("factory:active") | not) and
+                    ([.labels[].name] | index("factory:blocked") | not) and
+                    ([.labels[].name] | index("risk:prohibited") | not)
+                  )
+                ] |
+                sort_by(.createdAt) |
+                .[0].number // empty
+              '
+          }
+
+          issue_number="$(select_issue "factory:repair")"
+          if [ -z "$issue_number" ]; then
+            issue_number="$(select_issue "factory:ready")"
+          fi
+          if [ -z "$issue_number" ]; then
             echo "No ready or repair work."
             exit 0
           fi
 
-          gh workflow run factory-implement.lock.yml --repo "$REPOSITORY"
+          attempt_count="$(
+            gh api \
+              --paginate \
+              "repos/$REPOSITORY/issues/$issue_number/comments" \
+              --jq '[
+                .[] |
+                select(
+                  .user.login == "github-actions[bot]" and
+                  .performed_via_github_app.slug == "github-actions" and
+                  .created_at == .updated_at and
+                  (.body | contains("<!-- FACTORY_IMPLEMENT_ATTEMPT -->"))
+                )
+              ] | length'
+          )"
+          if [ "$attempt_count" -ge "$max_attempts" ]; then
+            gh issue edit "$issue_number" \
+              --repo "$REPOSITORY" \
+              --remove-label "factory:ready" \
+              --remove-label "factory:repair" \
+              --remove-label "factory:active" \
+              --add-label "factory:blocked"
+            upsert_incident \
+              "[factory dispatch] Issue #$issue_number exhausted implementation attempts" \
+              "Issue #$issue_number reached the policy ceiling of $max_attempts attempts and was moved to factory:blocked."
+            exit 1
+          fi
+
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            upsert_incident \
+              "[factory dispatch] Missing trigger credential" \
+              "The queue has eligible work, but GH_AW_CI_TRIGGER_TOKEN is not configured. The default Actions token dispatches as github-actions[bot], which fails the implementer's gh-aw role gate."
+            exit 1
+          fi
+
+          dispatch_actor="$(
+            GH_TOKEN="$DISPATCH_TOKEN" gh api user --jq '.login'
+          )"
+          dispatch_permission="$(
+            GH_TOKEN="$DISPATCH_TOKEN" gh api \
+              "repos/$REPOSITORY/collaborators/$dispatch_actor/permission" \
+              --jq '.permission'
+          )"
+          case "$dispatch_permission" in
+            admin|maintain|write) ;;
+            *)
+              upsert_incident \
+                "[factory dispatch] Trigger credential lacks write access" \
+                "GH_AW_CI_TRIGGER_TOKEN authenticates as $dispatch_actor with repository permission '$dispatch_permission'. The implementer requires write, maintain, or admin."
+              exit 1
+              ;;
+          esac
+
+          next_attempt="$((attempt_count + 1))"
+          aw_context="$(
+            jq -cn \
+              --argjson item_number "$issue_number" \
+              '{item_type:"issue", item_number:$item_number}'
+          )"
+
+          gh issue edit "$issue_number" \
+            --repo "$REPOSITORY" \
+            --add-label "factory:active"
+
+          if ! GH_TOKEN="$DISPATCH_TOKEN" gh workflow run \
+            "factory-implement.lock.yml" \
+            --repo "$REPOSITORY" \
+            --field "aw_context=$aw_context"; then
+            gh issue edit "$issue_number" \
+              --repo "$REPOSITORY" \
+              --remove-label "factory:active"
+            exit 1
+          fi
+
+          gh issue comment "$issue_number" \
+            --repo "$REPOSITORY" \
+            --body "Implementation attempt $next_attempt of $max_attempts dispatched as @$dispatch_actor.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->"
