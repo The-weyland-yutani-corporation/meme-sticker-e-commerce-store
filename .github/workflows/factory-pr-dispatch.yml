@@ -155,6 +155,8 @@ jobs:
                       .status == "queued" or
                       .status == "in_progress" or
                       .status == "waiting" or
+                      .status == "requested" or
+                      .status == "pending" or
                       .conclusion == "success"
                     )
                   ] | length

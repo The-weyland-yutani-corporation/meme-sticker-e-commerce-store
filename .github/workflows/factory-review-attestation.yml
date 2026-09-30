@@ -178,7 +178,7 @@ jobs:
                 <<<"$pr" >/dev/null; then
               continue
             fi
-            if grep -Eq '^(\.factory/policy\.yml|\.github/workflows/factory-review\.(md|lock\.yml)|\.github/workflows/factory-security-review\.(md|lock\.yml)|\.github/workflows/factory-review-attestation\.yml)$' \
+            if grep -Eq '^(\.factory/policy\.yml|\.github/workflows/factory-(dispatch|pr-dispatch)\.yml|\.github/workflows/factory-review\.(md|lock\.yml)|\.github/workflows/factory-security-review\.(md|lock\.yml)|\.github/workflows/factory-review-attestation\.yml)$' \
               <<<"$changed_files" &&
               [ "$FACTORY_ROOT_BOOTSTRAP_SHA" != "$head_sha" ] &&
               [ "$FACTORY_TOKENLESS_MIGRATION_SHA" != "$head_sha" ]; then
