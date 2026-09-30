@@ -33,6 +33,14 @@ Pull requests created with the workflow token do not emit recursive
 `pull_request` events. The conventional PR-dispatch controller therefore starts
 CI, CodeQL, correctness review, and security review explicitly against the PR
 head. Reviewer completion then wakes the deterministic attestation controller.
+The dispatcher records the exact implementer run ID on the selected issue; the
+PR controller uses that binding and the PR's closing-issue reference rather than
+guessing among concurrent work.
+
+The one-time migration away from GitHub App authentication is authorized only
+when `FACTORY_TOKENLESS_MIGRATION_SHA` exactly matches the migration PR head.
+This exception is non-reusable and exists separately from the consumed initial
+bootstrap exception.
 
 Implementation pull requests are opened ready for review and link their issue
 with a closing keyword. The lifecycle controller releases failed/no-output runs

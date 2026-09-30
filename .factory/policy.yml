@@ -43,6 +43,11 @@ authority:
       repository_variable: FACTORY_ROOT_BOOTSTRAP_SHA
       exact_head_sha_required: true
       reusable: false
+    tokenless_migration_exception:
+      repository_variable: FACTORY_TOKENLESS_MIGRATION_SHA
+      exact_head_sha_required: true
+      reusable: false
+      purpose: replace-github-app-authentication-with-explicit-workflow-dispatch
 
 queue:
   work_in_progress_limit: 2

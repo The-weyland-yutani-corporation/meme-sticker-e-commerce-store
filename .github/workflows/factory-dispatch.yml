@@ -155,7 +155,6 @@ jobs:
                 select(
                   .user.login == "github-actions[bot]" and
                   .performed_via_github_app.slug == "github-actions" and
-                  .created_at == .updated_at and
                   (.body | contains("<!-- FACTORY_IMPLEMENT_ATTEMPT -->"))
                 )
               ] | length'
@@ -194,6 +193,7 @@ jobs:
               --jq '.id'
           )"
 
+          dispatch_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if ! GH_TOKEN="$DISPATCH_TOKEN" gh workflow run \
             "factory-implement.lock.yml" \
             --repo "$REPOSITORY" \
@@ -206,3 +206,41 @@ jobs:
               "repos/$REPOSITORY/issues/comments/$attempt_comment_id"
             exit 1
           fi
+
+          implementer_run_id=""
+          for _ in {1..10}; do
+            implementer_run_id="$(
+              gh run list \
+                --repo "$REPOSITORY" \
+                --workflow "factory-implement.lock.yml" \
+                --event workflow_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt \
+                --jq --arg started "$dispatch_started" '
+                  [
+                    .[] |
+                    select(.createdAt >= $started)
+                  ] |
+                  sort_by(.createdAt) |
+                  last.databaseId // empty
+                '
+            )"
+            [ -n "$implementer_run_id" ] && break
+            sleep 2
+          done
+
+          if [ -z "$implementer_run_id" ]; then
+            upsert_incident \
+              "[factory dispatch] Could not bind implementer run for issue #$issue_number" \
+              "The implementer dispatch was accepted, but its run ID could not be correlated to issue #$issue_number. The issue remains active for deterministic reconciliation."
+            exit 1
+          fi
+
+          gh api \
+            --method PATCH \
+            "repos/$REPOSITORY/issues/comments/$attempt_comment_id" \
+            -f body="Implementation attempt $next_attempt of $max_attempts dispatched as @$DISPATCH_ACTOR.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->
+          <!-- FACTORY_IMPLEMENT_RUN: $implementer_run_id -->" \
+            >/dev/null

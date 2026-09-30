@@ -36,15 +36,31 @@ jobs:
             pr_number="${{ github.event.pull_request.number }}"
           else
             [ "${{ github.event.workflow_run.conclusion }}" = "success" ] || exit 0
-            active_issues="$(
+            issue_number="$(
               gh issue list \
                 --repo "$REPOSITORY" \
                 --state open \
                 --label "factory:active" \
                 --limit 100 \
-                --json number \
-                --jq '.[].number'
+                --json number,comments \
+                --jq --arg run "${{ github.event.workflow_run.id }}" '
+                  [
+                    .[] |
+                    select(
+                      any(
+                        .comments[];
+                        (
+                          .author.login == "github-actions" or
+                          .author.login == "github-actions[bot]"
+                        ) and
+                        (.body | contains("<!-- FACTORY_IMPLEMENT_RUN: \($run) -->"))
+                      )
+                    )
+                  ] |
+                  if length == 1 then .[0].number else empty end
+                '
             )"
+            [ -n "$issue_number" ] || exit 0
             open_prs="$(
               gh pr list \
                 --repo "$REPOSITORY" \
@@ -54,6 +70,7 @@ jobs:
                 --json number \
                 --jq '.[].number'
             )"
+            matched_count=0
             while read -r candidate; do
               [ -n "$candidate" ] || continue
               linked="$(
@@ -62,11 +79,12 @@ jobs:
                   --json closingIssuesReferences \
                   --jq '.closingIssuesReferences[].number'
               )"
-              if grep -Fqx -f <(printf '%s\n' "$active_issues") <<<"$linked"; then
+              if grep -Fqx "$issue_number" <<<"$linked"; then
                 pr_number="$candidate"
-                break
+                matched_count="$((matched_count + 1))"
               fi
             done <<<"$open_prs"
+            [ "$matched_count" -eq 1 ] || exit 1
           fi
 
           [ -n "$pr_number" ] || exit 0
@@ -87,6 +105,8 @@ jobs:
             { [ "$author" = "dependabot" ] || [ "$author" = "dependabot[bot]" ]; } &&
             [[ "$head_ref" == dependabot/* ]]
           }; then
+            # Internal factory/* branches rely on repository push permissions;
+            # untrusted forks cannot create or update them.
             if ! jq -e '.labels[].name | select(. == "factory:managed")' \
               <<<"$pr" >/dev/null; then
               if [ "${{ github.event_name }}" = "workflow_run" ]; then

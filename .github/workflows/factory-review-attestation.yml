@@ -56,6 +56,7 @@ jobs:
       - name: Verify review runs match the current pull request head
         env:
           FACTORY_ROOT_BOOTSTRAP_SHA: ${{ vars.FACTORY_ROOT_BOOTSTRAP_SHA }}
+          FACTORY_TOKENLESS_MIGRATION_SHA: ${{ vars.FACTORY_TOKENLESS_MIGRATION_SHA }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -179,7 +180,8 @@ jobs:
             fi
             if grep -Eq '^(\.factory/policy\.yml|\.github/workflows/factory-review\.(md|lock\.yml)|\.github/workflows/factory-security-review\.(md|lock\.yml)|\.github/workflows/factory-review-attestation\.yml)$' \
               <<<"$changed_files" &&
-              [ "$FACTORY_ROOT_BOOTSTRAP_SHA" != "$head_sha" ]; then
+              [ "$FACTORY_ROOT_BOOTSTRAP_SHA" != "$head_sha" ] &&
+              [ "$FACTORY_TOKENLESS_MIGRATION_SHA" != "$head_sha" ]; then
               continue
             fi
 
