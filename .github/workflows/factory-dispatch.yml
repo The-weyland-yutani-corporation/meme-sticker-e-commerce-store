@@ -215,8 +215,8 @@ jobs:
                 --workflow "factory-implement.lock.yml" \
                 --event workflow_dispatch \
                 --limit 20 \
-                --json databaseId,createdAt \
-                --jq --arg started "$dispatch_started" '
+                --json databaseId,createdAt |
+              jq -r --arg started "$dispatch_started" '
                   [
                     .[] |
                     select(.createdAt >= $started)
