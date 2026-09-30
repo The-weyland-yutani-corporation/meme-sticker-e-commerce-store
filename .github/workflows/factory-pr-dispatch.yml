@@ -88,6 +88,12 @@ jobs:
           fi
 
           [ -n "$pr_number" ] || exit 0
+          pr_api="$(
+            gh api "repos/$REPOSITORY/pulls/$pr_number"
+          )"
+          [ "$(jq -r '.head.repo.full_name' <<<"$pr_api")" = "$REPOSITORY" ] ||
+            exit 0
+
           pr="$(
             gh pr view "$pr_number" \
               --repo "$REPOSITORY" \
@@ -99,14 +105,23 @@ jobs:
           head_ref="$(jq -r '.headRefName' <<<"$pr")"
           head_sha="$(jq -r '.headRefOid' <<<"$pr")"
           title="$(jq -r '.title' <<<"$pr")"
+          association="$(jq -r '.author_association' <<<"$pr_api")"
+
+          if [ "${{ github.event_name }}" = "pull_request" ] &&
+            [ "$author" != "dependabot" ] &&
+            [ "$author" != "dependabot[bot]" ]; then
+            case "$association" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *) exit 0 ;;
+            esac
+          fi
+
           if {
             [[ "$head_ref" == factory/* ]] && [[ "$title" == "[factory] "* ]]
           } || {
             { [ "$author" = "dependabot" ] || [ "$author" = "dependabot[bot]" ]; } &&
             [[ "$head_ref" == dependabot/* ]]
           }; then
-            # Internal factory/* branches rely on repository push permissions;
-            # untrusted forks cannot create or update them.
             if ! jq -e '.labels[].name | select(. == "factory:managed")' \
               <<<"$pr" >/dev/null; then
               if [ "${{ github.event_name }}" = "workflow_run" ]; then

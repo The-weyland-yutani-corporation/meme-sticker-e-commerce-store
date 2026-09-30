@@ -36,6 +36,9 @@ head. Reviewer completion then wakes the deterministic attestation controller.
 The dispatcher records the exact implementer run ID on the selected issue; the
 PR controller uses that binding and the PR's closing-issue reference rather than
 guessing among concurrent work.
+For direct pull-request events, the controller also requires a same-repository
+head and an owner/member/collaborator association (or the verified Dependabot
+identity) before it can dispatch AI reviews.
 
 The one-time migration away from GitHub App authentication is authorized only
 when `FACTORY_TOKENLESS_MIGRATION_SHA` exactly matches the migration PR head.
