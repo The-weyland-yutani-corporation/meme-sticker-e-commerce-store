@@ -87,9 +87,16 @@ jobs:
             { [ "$author" = "dependabot" ] || [ "$author" = "dependabot[bot]" ]; } &&
             [[ "$head_ref" == dependabot/* ]]
           }; then
-            gh issue edit "$pr_number" \
-              --repo "$REPOSITORY" \
-              --add-label "factory:managed"
+            if ! jq -e '.labels[].name | select(. == "factory:managed")' \
+              <<<"$pr" >/dev/null; then
+              if [ "${{ github.event_name }}" = "workflow_run" ]; then
+                gh issue edit "$pr_number" \
+                  --repo "$REPOSITORY" \
+                  --add-label "factory:managed"
+              else
+                exit 0
+              fi
+            fi
           else
             exit 0
           fi
