@@ -5,6 +5,11 @@ on:
     types: [created]
   pull_request:
     types: [synchronize]
+  workflow_run:
+    workflows:
+      - "Independent factory reviewer"
+      - "Independent factory security reviewer"
+    types: [completed]
   schedule:
     - cron: "4,14,24,34,44,54 * * * *"
   workflow_dispatch:
@@ -78,7 +83,10 @@ jobs:
               [ "$(jq -r '.head_sha' <<<"$run")" = "$expected_sha" ] &&
               [ "$(jq -r '.name' <<<"$run")" = "$expected_workflow" ] &&
               [ "$(jq -r '.path' <<<"$run")" = "$expected_path" ] &&
-              [ "$(jq -r '.event' <<<"$run")" = "pull_request" ] ||
+              {
+                [ "$(jq -r '.event' <<<"$run")" = "pull_request" ] ||
+                [ "$(jq -r '.event' <<<"$run")" = "workflow_dispatch" ]
+              } ||
               return 1
 
             local artifact_dir

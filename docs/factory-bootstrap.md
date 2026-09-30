@@ -17,28 +17,22 @@ credentials in implementation or review jobs.
    The included CodeQL job uses local SARIF enforcement so it also works when
    GitHub Advanced Security is not licensed for a private repository.
 5. Create the labels referenced by `.factory/policy.yml` and the workflows.
-6. Install the Dark Factory Mage GitHub App on this repository, expose its
-   private key as `DARK_FACTORY_MAGE_APP_PRIVATE_KEY`, and set
-   `DARK_FACTORY_MAGE_APP_CLIENT_ID` and `DARK_FACTORY_MAGE_APP_ID`. The
-   dispatcher mints a short-lived token scoped to this repository with only
-   Actions write permission. The implementer's SafeOutputs handler separately
-   mints the minimum App token needed to push the empty commit that starts CI
-   and independent reviews. The App client secret is not used by Actions.
-   Treat private-key compromise as a control-plane incident and rotate the key
-   immediately because the App installation may hold broader future permissions.
+6. Set the repository's default workflow permissions to **Read and write** and
+   enable **Allow GitHub Actions to create and approve pull requests**. No
+   personal token or GitHub App credential is required.
 
 The conventional `Factory queue dispatcher` performs a low-cost 15-minute
 reconciliation and invokes the AI implementer only when a ready/repair issue
 exists, the WIP limit allows it, and no implementer is already active. It passes
 the selected issue through `aw_context`, records bounded attempts, and uses the
-App token only for workflow dispatch. The implementer has no direct issue-event
-activation or collaborator role check; GitHub's Actions permission and the
-dispatcher context form the activation boundary.
+workflow token for explicit `workflow_dispatch`. The implementer has no direct
+issue-event activation or collaborator role check; GitHub's Actions permission
+and the dispatcher context form the activation boundary.
 
-SafeOutputs creates the implementation PR with the workflow token, then uses a
-short-lived Dark Factory Mage token for the extra empty commit required to
-produce normal `push` and `pull_request` events. Do not disable that extra commit
-unless another event-producing CI identity replaces it.
+Pull requests created with the workflow token do not emit recursive
+`pull_request` events. The conventional PR-dispatch controller therefore starts
+CI, CodeQL, correctness review, and security review explicitly against the PR
+head. Reviewer completion then wakes the deterministic attestation controller.
 
 Implementation pull requests are opened ready for review and link their issue
 with a closing keyword. The lifecycle controller releases failed/no-output runs
