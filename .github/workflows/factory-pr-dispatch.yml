@@ -107,8 +107,7 @@ jobs:
           title="$(jq -r '.title' <<<"$pr")"
           association="$(jq -r '.author_association' <<<"$pr_api")"
 
-          if [ "${{ github.event_name }}" = "pull_request" ] &&
-            [ "$author" != "dependabot" ] &&
+          if [ "$author" != "dependabot" ] &&
             [ "$author" != "dependabot[bot]" ]; then
             case "$association" in
               OWNER|MEMBER|COLLABORATOR) ;;

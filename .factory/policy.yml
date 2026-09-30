@@ -34,6 +34,8 @@ authority:
       - direct-current-head-merge
     immutable_after_bootstrap:
       - ".factory/policy.yml"
+      - ".github/workflows/factory-dispatch.yml"
+      - ".github/workflows/factory-pr-dispatch.yml"
       - ".github/workflows/factory-review.md"
       - ".github/workflows/factory-review.lock.yml"
       - ".github/workflows/factory-security-review.md"
@@ -83,6 +85,8 @@ risk:
   prohibited:
     paths:
       - ".factory/policy.yml"
+      - ".github/workflows/factory-dispatch.yml"
+      - ".github/workflows/factory-pr-dispatch.yml"
       - ".github/workflows/factory-review.md"
       - ".github/workflows/factory-review.lock.yml"
       - ".github/workflows/factory-security-review.md"
