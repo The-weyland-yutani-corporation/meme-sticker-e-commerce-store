@@ -138,7 +138,8 @@ jobs:
               --argjson pull_request "$pr_number" \
               --arg head_sha "$head_sha" \
               '{
-                pull_request: $pull_request,
+                item_type: "pull_request",
+                item_number: $pull_request,
                 head_sha: $head_sha,
                 instruction: "Review exactly this pull request and current head."
               }'
