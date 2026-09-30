@@ -157,9 +157,9 @@ export function Storefront({ products }: { products: readonly Product[] }) {
 
           <div className="hero-visual" aria-label="Featured sticker wall">
             <div className="grid-lines" />
-            <div className="sticker sticker-fire">🔥</div>
-            <div className="sticker sticker-stonks">📈</div>
-            <div className="sticker sticker-duck">🦆</div>
+            <div className="sticker sticker-fire" aria-hidden="true">🔥</div>
+            <div className="sticker sticker-stonks" aria-hidden="true">📈</div>
+            <div className="sticker sticker-duck" aria-hidden="true">🦆</div>
             <div className="terminal-card">
               <div>
                 <span />
@@ -359,6 +359,7 @@ export function Storefront({ products }: { products: readonly Product[] }) {
                     <span
                       className="cart-item-art"
                       style={{ background: product.accent }}
+                      aria-hidden="true"
                     >
                       {product.emoji}
                     </span>
