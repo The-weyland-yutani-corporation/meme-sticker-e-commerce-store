@@ -57,6 +57,13 @@ governance requirements in `.factory/policy.yml`. A governance agent may change
 the control plane without human approval, but the implementation agent remains
 prohibited from those paths.
 
+Evaluate the patch and evidence available to this read-only reviewer. Do not
+return `CHANGES_REQUIRED` solely because repository variables or required-check
+state are unavailable to reviewer tools. Record that as a verification gap;
+the deterministic attestation controller independently enforces exact-head
+exception variables and required checks before merge. Return a blocking finding
+when the patch weakens, omits, or bypasses that enforcement.
+
 Post one structured comment:
 
 - begin with `FACTORY_SECURITY_REVIEW`;
