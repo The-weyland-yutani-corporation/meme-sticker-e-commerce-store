@@ -1,0 +1,187 @@
+name: Factory pull request dispatcher
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  workflow_run:
+    workflows: ["Factory implementer"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: factory-pr-dispatch-${{ github.event.pull_request.number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Dispatch PR validation and reviews
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Resolve pull request and dispatch current head
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            pr_number="${{ github.event.pull_request.number }}"
+          else
+            [ "${{ github.event.workflow_run.conclusion }}" = "success" ] || exit 0
+            issue_number="$(
+              gh issue list \
+                --repo "$REPOSITORY" \
+                --state open \
+                --label "factory:active" \
+                --limit 100 \
+                --json number,comments \
+                --jq --arg run "${{ github.event.workflow_run.id }}" '
+                  [
+                    .[] |
+                    select(
+                      any(
+                        .comments[];
+                        (
+                          .author.login == "github-actions" or
+                          .author.login == "github-actions[bot]"
+                        ) and
+                        (.body | contains("<!-- FACTORY_IMPLEMENT_RUN: \($run) -->"))
+                      )
+                    )
+                  ] |
+                  if length == 1 then .[0].number else empty end
+                '
+            )"
+            [ -n "$issue_number" ] || exit 0
+            open_prs="$(
+              gh pr list \
+                --repo "$REPOSITORY" \
+                --state open \
+                --label "factory:managed" \
+                --limit 100 \
+                --json number \
+                --jq '.[].number'
+            )"
+            matched_count=0
+            while read -r candidate; do
+              [ -n "$candidate" ] || continue
+              linked="$(
+                gh pr view "$candidate" \
+                  --repo "$REPOSITORY" \
+                  --json closingIssuesReferences \
+                  --jq '.closingIssuesReferences[].number'
+              )"
+              if grep -Fqx "$issue_number" <<<"$linked"; then
+                pr_number="$candidate"
+                matched_count="$((matched_count + 1))"
+              fi
+            done <<<"$open_prs"
+            [ "$matched_count" -eq 1 ] || exit 1
+          fi
+
+          [ -n "$pr_number" ] || exit 0
+          pr_api="$(
+            gh api "repos/$REPOSITORY/pulls/$pr_number"
+          )"
+          [ "$(jq -r '.head.repo.full_name' <<<"$pr_api")" = "$REPOSITORY" ] ||
+            exit 0
+
+          pr="$(
+            gh pr view "$pr_number" \
+              --repo "$REPOSITORY" \
+              --json author,headRefName,headRefOid,isDraft,labels,title
+          )"
+          [ "$(jq -r '.isDraft' <<<"$pr")" = "false" ] || exit 0
+
+          author="$(jq -r '.author.login' <<<"$pr")"
+          head_ref="$(jq -r '.headRefName' <<<"$pr")"
+          head_sha="$(jq -r '.headRefOid' <<<"$pr")"
+          title="$(jq -r '.title' <<<"$pr")"
+          association="$(jq -r '.author_association' <<<"$pr_api")"
+
+          if [ "$author" != "dependabot" ] &&
+            [ "$author" != "dependabot[bot]" ]; then
+            case "$association" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *) exit 0 ;;
+            esac
+          fi
+
+          if {
+            [[ "$head_ref" == factory/* ]] && [[ "$title" == "[factory] "* ]]
+          } || {
+            { [ "$author" = "dependabot" ] || [ "$author" = "dependabot[bot]" ]; } &&
+            [[ "$head_ref" == dependabot/* ]]
+          }; then
+            if ! jq -e '.labels[].name | select(. == "factory:managed")' \
+              <<<"$pr" >/dev/null; then
+              if [ "${{ github.event_name }}" = "workflow_run" ]; then
+                gh issue edit "$pr_number" \
+                  --repo "$REPOSITORY" \
+                  --add-label "factory:managed"
+              else
+                exit 0
+              fi
+            fi
+          else
+            exit 0
+          fi
+
+          function dispatch_once() {
+            local workflow="$1"
+            shift
+            runs="$(
+              gh run list \
+                --repo "$REPOSITORY" \
+                --workflow "$workflow" \
+                --branch "$head_ref" \
+                --limit 20 \
+                --json headSha,status,conclusion
+            )"
+            existing="$(
+              jq --arg sha "$head_sha" '
+                  [
+                    .[] |
+                    select(.headSha == $sha) |
+                    select(
+                      .status == "queued" or
+                      .status == "in_progress" or
+                      .status == "waiting" or
+                      .status == "requested" or
+                      .status == "pending" or
+                      .conclusion == "success"
+                    )
+                  ] | length
+                ' <<<"$runs"
+            )"
+            [ "$existing" -eq 0 ] || return 0
+            gh workflow run "$workflow" \
+              --repo "$REPOSITORY" \
+              --ref "$head_ref" \
+              "$@"
+          }
+
+          context="$(
+            jq -cn \
+              --argjson pull_request "$pr_number" \
+              --arg head_sha "$head_sha" \
+              '{
+                item_type: "pull_request",
+                item_number: $pull_request,
+                head_sha: $head_sha,
+                instruction: "Review exactly this pull request and current head."
+              }'
+          )"
+
+          dispatch_once "ci.yml"
+          dispatch_once "codeql.yml"
+          dispatch_once "factory-review.lock.yml" -f "aw_context=$context"
+          dispatch_once "factory-security-review.lock.yml" -f "aw_context=$context"

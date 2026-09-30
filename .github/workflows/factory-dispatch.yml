@@ -23,53 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify GitHub App configuration
-        env:
-          APP_ID: ${{ vars.DARK_FACTORY_MAGE_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.DARK_FACTORY_MAGE_APP_PRIVATE_KEY }}
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
-            exit 0
-          fi
-
-          title="[factory dispatch] Missing GitHub App configuration"
-          existing="$(
-            gh issue list \
-              --repo "$REPOSITORY" \
-              --state open \
-              --search "$title in:title" \
-              --limit 1 \
-              --json number \
-              --jq '.[0].number // empty'
-          )"
-          if [ -z "$existing" ]; then
-            gh issue create \
-              --repo "$REPOSITORY" \
-              --title "$title" \
-              --body "Set DARK_FACTORY_MAGE_APP_ID and expose DARK_FACTORY_MAGE_APP_PRIVATE_KEY to this repository before autonomous dispatch can run." \
-              --label "factory:incident"
-          fi
-          exit 1
-
-      - name: Mint repository-scoped dispatcher token
-        id: app-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
-        with:
-          app-id: ${{ vars.DARK_FACTORY_MAGE_APP_ID }}
-          private-key: ${{ secrets.DARK_FACTORY_MAGE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: write
-
       - name: Start implementer only when work is ready
         env:
-          DISPATCH_ACTOR: ${{ steps.app-token.outputs.app-slug }}[bot]
-          DISPATCH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DISPATCH_ACTOR: github-actions[bot]
+          DISPATCH_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -198,7 +155,6 @@ jobs:
                 select(
                   .user.login == "github-actions[bot]" and
                   .performed_via_github_app.slug == "github-actions" and
-                  .created_at == .updated_at and
                   (.body | contains("<!-- FACTORY_IMPLEMENT_ATTEMPT -->"))
                 )
               ] | length'
@@ -237,6 +193,7 @@ jobs:
               --jq '.id'
           )"
 
+          dispatch_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if ! GH_TOKEN="$DISPATCH_TOKEN" gh workflow run \
             "factory-implement.lock.yml" \
             --repo "$REPOSITORY" \
@@ -249,3 +206,41 @@ jobs:
               "repos/$REPOSITORY/issues/comments/$attempt_comment_id"
             exit 1
           fi
+
+          implementer_run_id=""
+          for _ in {1..10}; do
+            implementer_run_id="$(
+              gh run list \
+                --repo "$REPOSITORY" \
+                --workflow "factory-implement.lock.yml" \
+                --event workflow_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt \
+                --jq --arg started "$dispatch_started" '
+                  [
+                    .[] |
+                    select(.createdAt >= $started)
+                  ] |
+                  sort_by(.createdAt) |
+                  last.databaseId // empty
+                '
+            )"
+            [ -n "$implementer_run_id" ] && break
+            sleep 2
+          done
+
+          if [ -z "$implementer_run_id" ]; then
+            upsert_incident \
+              "[factory dispatch] Could not bind implementer run for issue #$issue_number" \
+              "The implementer dispatch was accepted, but its run ID could not be correlated to issue #$issue_number. The issue remains active for deterministic reconciliation."
+            exit 1
+          fi
+
+          gh api \
+            --method PATCH \
+            "repos/$REPOSITORY/issues/comments/$attempt_comment_id" \
+            -f body="Implementation attempt $next_attempt of $max_attempts dispatched as @$DISPATCH_ACTOR.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->
+          <!-- FACTORY_IMPLEMENT_RUN: $implementer_run_id -->" \
+            >/dev/null

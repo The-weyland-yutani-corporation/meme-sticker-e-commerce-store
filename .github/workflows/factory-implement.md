@@ -39,11 +39,8 @@ network:
   allowed: [defaults, github, node]
 
 safe-outputs:
-  github-app:
-    client-id: ${{ secrets.DARK_FACTORY_MAGE_APP_CLIENT_ID }}
-    private-key: ${{ secrets.DARK_FACTORY_MAGE_APP_PRIVATE_KEY }}
   create-pull-request:
-    github-token-for-extra-empty-commit: app
+    github-token-for-extra-empty-commit: none
     title-prefix: "[factory] "
     labels: [factory:managed]
     draft: false

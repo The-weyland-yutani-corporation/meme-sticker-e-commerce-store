@@ -4,8 +4,7 @@ engine: copilot
 timeout-minutes: 20
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,6 +32,10 @@ safe-outputs:
 ---
 
 # Independent factory reviewer
+
+When the workflow dispatch context identifies a pull request, review exactly
+that pull request. If the context is absent or invalid, emit a noop. Never
+select or substitute another pull request.
 
 Review pull requests with the `factory:managed` label when either:
 
