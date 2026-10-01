@@ -1,0 +1,36 @@
+name: Factory signal collector
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "11,41 * * * *"
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+  security-events: read
+
+concurrency:
+  group: factory-signal-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect deterministic signals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
+      PRODUCTION_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
+      REPOSITORY: ${{ github.repository }}
+      SIGNAL_COOLDOWN_HOURS: "6"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Collect repository and production signals
+        shell: bash
+        run: bash .github/workflows/scripts/collect-factory-signals.sh

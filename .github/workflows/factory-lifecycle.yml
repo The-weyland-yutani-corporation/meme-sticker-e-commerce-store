@@ -3,11 +3,12 @@ name: Factory work lifecycle
 on:
   pull_request:
     types: [opened, closed]
-  workflow_run:
-    workflows: ["Factory implementer"]
-    types: [completed]
+  schedule:
+    - cron: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
+  workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   issues: write
   pull-requests: read
@@ -20,7 +21,7 @@ jobs:
   reconcile:
     name: Reconcile issue and pull request state
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
@@ -30,74 +31,152 @@ jobs:
         run: |
           set -euo pipefail
 
-          function linked_issues() {
+          function provenance_issue() {
             local pr_number="$1"
-            gh pr view "$pr_number" \
-              --repo "$REPOSITORY" \
-              --json closingIssuesReferences \
-              --jq '.closingIssuesReferences[].number'
+            gh api \
+              --paginate \
+              --slurp \
+              "repos/$REPOSITORY/issues/$pr_number/comments" |
+            jq -r '
+              [
+                .[][] |
+                select(.user.login == "github-actions[bot]") |
+                .body |
+                try capture(
+                  "FACTORY_PROVENANCE issue=(?<issue>[0-9]+) run=[0-9]+"
+                ).issue catch empty
+              ] |
+              last // empty
+            '
           }
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if ! jq -e '.pull_request.labels[].name | select(. == "factory:managed")' \
-              "$GITHUB_EVENT_PATH" >/dev/null; then
-              exit 0
+          function comment_once() {
+            local issue_number="$1"
+            local marker="$2"
+            local body="$3"
+            if gh api \
+              --paginate \
+              "repos/$REPOSITORY/issues/$issue_number/comments" \
+              --jq --arg marker "$marker" '
+                any(
+                  .[];
+                  .user.login == "github-actions[bot]" and
+                  (.body | contains($marker))
+                )
+              ' | grep -Fqx "true"; then
+              return 0
             fi
-
-            pr_number="${{ github.event.pull_request.number }}"
-            while read -r issue_number; do
-              [ -n "$issue_number" ] || continue
-              if [ "${{ github.event.action }}" = "opened" ]; then
-                gh issue edit "$issue_number" \
-                  --repo "$REPOSITORY" \
-                  --remove-label "factory:ready" \
-                  --remove-label "factory:repair" \
-                  --add-label "factory:active"
-              elif [ "${{ github.event.pull_request.merged }}" = "false" ]; then
-                gh issue edit "$issue_number" \
-                  --repo "$REPOSITORY" \
-                  --remove-label "factory:active" \
-                  --add-label "factory:repair"
-                gh issue comment "$issue_number" \
-                  --repo "$REPOSITORY" \
-                  --body "Factory PR #$pr_number closed without merge; work returned to the repair queue."
-              else
-                gh issue edit "$issue_number" \
-                  --repo "$REPOSITORY" \
-                  --remove-label "factory:active" || true
-              fi
-            done < <(linked_issues "$pr_number")
-            exit 0
-          fi
-
-          active_issues="$(
-            gh issue list \
+            gh issue comment "$issue_number" \
               --repo "$REPOSITORY" \
-              --state open \
-              --label "factory:active" \
-              --limit 100 \
-              --json number \
-              --jq '.[].number'
-          )"
-          open_pr_bodies="$(
+              --body "$body
+
+          $marker" >/dev/null
+          }
+
+          gh pr list \
+            --repo "$REPOSITORY" \
+            --state all \
+            --label "factory:managed" \
+            --limit 100 \
+            --json number,state,mergedAt \
+            --jq '.[] | [.number, .state, (.mergedAt // "")] | @tsv' |
+          while IFS=$'\t' read -r pr_number state merged_at; do
+            [ -n "$pr_number" ] || continue
+            issue_number="$(provenance_issue "$pr_number")"
+            [ -n "$issue_number" ] || continue
+
+            if [ -n "$merged_at" ]; then
+              gh issue edit "$issue_number" \
+                --repo "$REPOSITORY" \
+                --remove-label "factory:active" \
+                --remove-label "factory:ready" \
+                --remove-label "factory:repair" || true
+              issue_state="$(
+                gh issue view "$issue_number" \
+                  --repo "$REPOSITORY" \
+                  --json state \
+                  --jq '.state'
+              )"
+              if [ "$issue_state" = "OPEN" ]; then
+                gh issue close "$issue_number" \
+                  --repo "$REPOSITORY" \
+                  --comment "Factory PR #$pr_number merged after current-head deterministic checks and independent reviews." >/dev/null
+              fi
+            elif [ "$state" = "OPEN" ]; then
+              gh issue edit "$issue_number" \
+                --repo "$REPOSITORY" \
+                --remove-label "factory:ready" \
+                --remove-label "factory:repair" \
+                --add-label "factory:active" >/dev/null
+            else
+              gh issue edit "$issue_number" \
+                --repo "$REPOSITORY" \
+                --remove-label "factory:active" \
+                --remove-label "factory:ready" \
+                --add-label "factory:repair" >/dev/null
+              comment_once \
+                "$issue_number" \
+                "<!-- FACTORY_REPAIR_PR: $pr_number -->" \
+                "Factory PR #$pr_number closed without merge; work returned to the bounded repair queue."
+            fi
+          done
+
+          all_pr_bodies="$(
             gh pr list \
               --repo "$REPOSITORY" \
-              --state open \
+              --state all \
               --label "factory:managed" \
               --limit 100 \
               --json body \
-              --jq '.[].body'
+              --jq '.[].body // ""'
           )"
-
-          while read -r issue_number; do
-            [ -n "$issue_number" ] || continue
-            if ! grep -Eiq "(close[sd]?|fix(e[sd])?|resolve[sd]?) +#$issue_number([^0-9]|$)" \
-              <<<"$open_pr_bodies"; then
-              gh issue edit "$issue_number" \
-                --repo "$REPOSITORY" \
-                --remove-label "factory:active"
-              gh issue comment "$issue_number" \
-                --repo "$REPOSITORY" \
-                --body "Implementer run ${{ github.event.workflow_run.html_url }} completed with conclusion \`${{ github.event.workflow_run.conclusion }}\` without opening a linked PR; the issue is eligible for its next bounded attempt."
+          gh issue list \
+            --repo "$REPOSITORY" \
+            --state open \
+            --label "factory:active" \
+            --limit 100 \
+            --json number,comments \
+            --jq '.[] | [.number, (.comments | map(.body) | join("\n"))] | @base64' |
+          while read -r encoded; do
+            [ -n "$encoded" ] || continue
+            issue="$(
+              base64 --decode <<<"$encoded" |
+              jq '{number: .[0], comments: .[1]}'
+            )"
+            issue_number="$(jq -r '.number' <<<"$issue")"
+            run_id="$(
+              jq -r '
+                .comments |
+                [
+                  try scan("FACTORY_IMPLEMENT_RUN: ([0-9]+)")[] catch empty
+                ] |
+                last // empty
+              ' <<<"$issue"
+            )"
+            [ -n "$run_id" ] || continue
+            if grep -Fq "id: $run_id, workflow_id: factory-implement" \
+              <<<"$all_pr_bodies"; then
+              continue
             fi
-          done <<<"$active_issues"
+
+            run="$(
+              gh api "repos/$REPOSITORY/actions/runs/$run_id" 2>/dev/null ||
+                true
+            )"
+            [ -n "$run" ] || continue
+            [ "$(jq -r '.status' <<<"$run")" = "completed" ] || continue
+
+            completed_epoch="$(
+              date -d "$(jq -r '.updated_at' <<<"$run")" +%s
+            )"
+            now_epoch="$(date +%s)"
+            [ "$((now_epoch - completed_epoch))" -ge 900 ] || continue
+
+            gh issue edit "$issue_number" \
+              --repo "$REPOSITORY" \
+              --remove-label "factory:active" >/dev/null
+            comment_once \
+              "$issue_number" \
+              "<!-- FACTORY_NO_OUTPUT_RUN: $run_id -->" \
+              "Implementer run $(jq -r '.html_url' <<<"$run") completed with conclusion \`$(jq -r '.conclusion' <<<"$run")\` without a provenance-verified pull request; the issue is eligible for its next bounded attempt."
+          done

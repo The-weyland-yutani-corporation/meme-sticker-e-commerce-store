@@ -43,7 +43,10 @@ jobs:
               [ "$(jq -r '.head_sha' <<<"$run")" = "$expected_sha" ] &&
               [ "$(jq -r '.name' <<<"$run")" = "$expected_name" ] &&
               [ "$(jq -r '.path' <<<"$run")" = "$expected_path" ] &&
-              [ "$(jq -r '.event' <<<"$run")" = "pull_request" ] ||
+              {
+                [ "$(jq -r '.event' <<<"$run")" = "pull_request" ] ||
+                [ "$(jq -r '.event' <<<"$run")" = "workflow_dispatch" ]
+              } ||
               return 1
 
             artifact_dir="$(mktemp -d)"
@@ -163,31 +166,35 @@ jobs:
             fi
             [ "${#failure_urls[@]}" -gt 0 ] || continue
 
-            issue_numbers="$(
-              gh pr view "$pr_number" \
-                --repo "$REPOSITORY" \
-                --json closingIssuesReferences \
-                --jq '.closingIssuesReferences[].number'
+            issue_number="$(
+              jq -r '
+                [
+                  .[][] |
+                  select(.user.login == "github-actions[bot]") |
+                  .body |
+                  try capture(
+                    "FACTORY_PROVENANCE issue=(?<issue>[0-9]+) run=[0-9]+"
+                  ).issue catch empty
+                ] |
+                last // empty
+              ' <<<"$comments"
             )"
-            [ -n "$issue_numbers" ] || continue
+            [ -n "$issue_number" ] || continue
 
             findings="$(
               printf -- "- %s\n" "${failure_urls[@]}"
             )"
-            while read -r issue_number; do
-              [ -n "$issue_number" ] || continue
-              gh issue comment "$issue_number" \
-                --repo "$REPOSITORY" \
-                --body "Factory PR #$pr_number requires a replacement implementation for the current reviewed head.
+            gh issue comment "$issue_number" \
+              --repo "$REPOSITORY" \
+              --body "Factory PR #$pr_number requires a replacement implementation for the current reviewed head.
 
           Verified review findings:
           $findings"
-              gh issue edit "$issue_number" \
-                --repo "$REPOSITORY" \
-                --remove-label "factory:active" \
-                --remove-label "factory:ready" \
-                --add-label "factory:repair"
-            done <<<"$issue_numbers"
+            gh issue edit "$issue_number" \
+              --repo "$REPOSITORY" \
+              --remove-label "factory:active" \
+              --remove-label "factory:ready" \
+              --add-label "factory:repair"
 
             gh pr close "$pr_number" \
               --repo "$REPOSITORY" \
