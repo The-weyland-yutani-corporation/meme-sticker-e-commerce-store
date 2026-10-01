@@ -114,14 +114,70 @@ administration.
 
 ## Providers
 
-1. Connect the repository to Vercel.
-2. Configure rolling release stages at 5%, 25%, 50%, and 100%.
-3. Add `PRODUCTION_HEALTH_URL` as a repository variable.
-4. Add `VERCEL_TOKEN` only to the production health controller environment.
-5. Provision PostgreSQL and add `DATABASE_URL` to Vercel.
-6. Add Stripe test credentials and configure `/api/stripe/webhook`.
-7. Promote to Stripe live mode only after a successful synthetic checkout and
-   rollback exercise.
+The conventional `Autonomous release controller` is the only scheduled release
+loop. Every 15 minutes (and on `workflow_dispatch`) it compares the latest main
+SHA with successful GitHub production Deployments. A missing deployment is
+released through staging and production; an already deployed SHA receives
+ongoing health checks. Push delivery is not the source of truth.
+
+1. Connect the repository to Vercel and create a custom `staging` environment.
+2. Configure Vercel rolling release stages at 5%, 25%, 50%, and 100%.
+3. Configure both `staging` and `production` GitHub environments. Do not add
+   required reviewers because the controller is unattended.
+4. Add these variables to each GitHub environment:
+   - `APP_URL`: the stable HTTPS origin for that environment;
+   - `VERCEL_ORG_ID`: the Vercel `team_...` or `user_...` ID;
+   - `VERCEL_PROJECT_ID`: the Vercel `prj_...` project ID.
+5. Add these secrets to each GitHub environment:
+   - `VERCEL_TOKEN`: a token limited to the project/team;
+   - `DATABASE_URL`: the environment-specific PostgreSQL connection URL;
+   - `STRIPE_SECRET_KEY`: `sk_test_...` in staging; production may remain in
+     test mode until live commerce is intentionally enabled;
+   - `STRIPE_WEBHOOK_SECRET`: the environment-specific `whsec_...` secret.
+   - Optional `VERCEL_AUTOMATION_BYPASS_SECRET`: the environment's deployment
+     protection bypass secret when Vercel protection would otherwise reject
+     controller probes.
+6. Configure the matching Vercel environment variables `APP_URL`,
+   `DATABASE_URL`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET`. The GitHub
+   copies are used only for migrations and non-transactional release probes;
+   Vercel's copies are the application runtime configuration.
+7. Provision independent staging and production PostgreSQL databases and apply
+   least-privilege/network controls that still permit GitHub-hosted runners.
+8. Register separate Stripe webhook endpoints for the staging and production
+   origins at `/api/stripe/webhook`.
+
+The controller fails closed when any required value is absent or malformed.
+It also pulls Vercel's selected environment before migration and confirms the
+four required runtime keys exist without printing their values. Staging must
+use a Stripe test secret. Release probes only perform HTTP GETs, `prisma migrate
+status`, and Stripe's read-only account retrieval API. They never create
+Checkout Sessions, PaymentIntents, test clocks, refunds, or live card charges.
+
+Database migrations are applied before each deployment only after the
+controller verifies that previously deployed migrations were not changed and
+that new SQL contains no destructive/rollback-unsafe statements. Schema
+changes must use an additive expand/migrate/contract sequence across separate
+releases.
+
+After staging migration, deployment, and probes pass, the controller deploys
+the exact same main SHA with Vercel's production target. GitHub Deployment
+statuses and retained JSON evidence record the SHA, URLs, previous production,
+workflow run, timestamp, and outcome.
+
+If the new production health gate fails, the controller first aborts any active
+Vercel rolling release and then rolls back to the URL from the previous
+successful GitHub production Deployment. Additive migrations remain in place
+and must be backward-compatible with the restored application. If Vercel is
+unavailable, abort/rollback errors are preserved in the failed run and the
+deduplicated `[factory signal] Autonomous release controller blocked` issue
+is updated with `factory:incident`, `factory:repair`, and `factory:signal`.
+
+Scheduled failures for an already deployed SHA abort an active rollout but do
+not blindly roll back: a provider, network, database, or Stripe outage is not
+enough evidence that the prior application version is safer. Recovery closes
+the open release incident. If no previous successful production Deployment URL
+exists, the first production promotion fails closed rather than claiming an
+automatic rollback succeeded.
 
 ## Proving exercises
 
