@@ -27,7 +27,7 @@ jobs:
           HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
         run: |
           set -euo pipefail
-          for attempt in 1 2 3 4 5; do
+          for _ in 1 2 3 4 5; do
             if curl --fail --silent --show-error \
               --max-time 10 \
               --retry 2 \
@@ -53,19 +53,91 @@ jobs:
       - name: Open or update incident issue
         if: failure()
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title="[factory incident] Production health check failed"
-          body="Automated production probes failed for ${HEALTH_URL}. Any active Vercel rolling release was aborted when credentials were available.
+          set -euo pipefail
+          fingerprint="production-health:api-health"
+          marker="<!-- factory-signal:${fingerprint} -->"
+          title="[factory signal] Production health requires attention"
+          body="## Active factory signal
 
-          Workflow run: ${RUN_URL}
+          - Priority: \`P1\`
+          - Category: \`production\`
+          - Fingerprint: \`${fingerprint}\`
+          - First observed: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
+          - Last observed: \`$(date -u +%Y-%m-%dT%H:%M:%SZ)\`
 
-          Labels: factory:incident, factory:repair"
-          existing="$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')"
+          ## Summary
+
+          Automated production probes failed for ${HEALTH_URL}. Any active Vercel rolling release was aborted when credentials were available.
+
+          ## Deterministic evidence
+
+          - Workflow run: ${RUN_URL}
+          - Health endpoint: ${HEALTH_URL%/}/api/health
+
+          ## Required response
+
+          Protect users first, verify the health endpoint, repair the smallest root cause, and require a successful production probe before closure.
+
+          ${marker}
+          <!-- factory-signal-category:production -->"
+          if ! gh label view "factory:signal" >/dev/null 2>&1; then
+            gh label create "factory:signal" \
+              --color "1D76DB" \
+              --description "Deterministic repository or production signal" ||
+              gh label view "factory:signal" >/dev/null
+          fi
+          existing="$(
+            gh api --paginate --slurp \
+              "repos/${{ github.repository }}/issues?state=all&labels=factory%3Asignal&per_page=100" |
+              jq -r --arg marker "$marker" '
+                add |
+                [
+                  .[] |
+                  select(
+                    .pull_request == null and
+                    ((.body // "") | contains($marker))
+                  )
+                ] |
+                sort_by(.number) |
+                first.number // empty
+              '
+          )"
+          if [ -z "$existing" ]; then
+            existing="$(
+              gh issue list \
+                --state all \
+                --search "\"[factory incident] Production health check failed\" in:title" \
+                --limit 1 \
+                --json number \
+                --jq '.[0].number // empty'
+            )"
+          fi
           if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
+            if gh api "repos/${{ github.repository }}/issues/$existing" \
+              --jq '
+                (.state_reason // "") == "not_planned" or
+                ([.labels[].name] | index("factory:muted") != null)
+              ' | grep -Fxq true; then
+              echo "Production signal #$existing is muted or closed as not planned."
+              exit 0
+            fi
+            gh issue reopen "$existing" 2>/dev/null || true
+            if ! gh issue view "$existing" --json body --jq '.body' | grep -Fq "$marker"; then
+              gh issue edit "$existing" \
+                --title "$title" \
+                --body "$body" \
+                --add-label "factory:incident,factory:signal"
+            else
+              echo "Production signal #$existing is already open; the collector will refresh it after cooldown."
+            fi
           else
-            gh issue create --title "$title" --body "$body" --label "factory:incident,factory:repair"
+            gh issue create \
+              --title "$title" \
+              --body "$body" \
+              --label "factory:incident,factory:signal"
           fi
