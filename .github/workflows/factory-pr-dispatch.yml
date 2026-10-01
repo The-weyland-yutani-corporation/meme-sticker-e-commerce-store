@@ -89,8 +89,8 @@ jobs:
                 --repo "$REPOSITORY" \
                 --state open \
                 --limit 100 \
-                --json number,comments \
-                --jq --arg run "$run_id" '
+                --json number,comments |
+              jq -r --arg run "$run_id" '
                   [
                     .[] |
                     select(
@@ -111,12 +111,11 @@ jobs:
 
             local marker
             marker="<!-- FACTORY_PROVENANCE issue=$issue_number run=$run_id -->"
-            if ! gh api \
-              --paginate \
-              "repos/$REPOSITORY/issues/$pr_number/comments" \
-              --jq --arg marker "$marker" '
+            if ! gh api --paginate --slurp \
+              "repos/$REPOSITORY/issues/$pr_number/comments" |
+              jq -r --arg marker "$marker" '
                 any(
-                  .[];
+                  .[][];
                   .user.login == "github-actions[bot]" and
                   (.body | contains($marker))
                 )
