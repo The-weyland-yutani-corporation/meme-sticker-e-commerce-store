@@ -6,8 +6,8 @@ app_url="${1:?usage: probe-release.sh <app-url>}"
 app_url="${app_url%/}"
 health_response="$(mktemp)"
 home_response="$(mktemp)"
-stripe_response="$(mktemp)"
-trap 'rm -f "$health_response" "$home_response" "$stripe_response"' EXIT
+synthetic_response="$(mktemp)"
+trap 'rm -f "$health_response" "$home_response" "$synthetic_response"' EXIT
 
 probe_url() {
   local url="$1"
@@ -19,13 +19,6 @@ probe_url() {
     --location
     --max-time 15
   )
-
-  if [[ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]]; then
-    curl_arguments+=(
-      --header
-      "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}"
-    )
-  fi
 
   for attempt in 1 2 3 4 5; do
     if curl "${curl_arguments[@]}" "$url" >"$output_file"; then
@@ -42,7 +35,8 @@ probe_url() {
 probe_url "${app_url}/api/health" "$health_response"
 jq -e '
   .status == "ok" and
-  .service == "meme-sticker-store"
+  .service == "meme-sticker-store" and
+  .version == env.EXPECTED_RELEASE_SHA
 ' "$health_response" >/dev/null
 
 probe_url "${app_url}/" "$home_response"
@@ -54,10 +48,14 @@ curl \
   --fail \
   --silent \
   --show-error \
-  --get \
-  --user "${STRIPE_SECRET_KEY}:" \
-  --max-time 15 \
-  https://api.stripe.com/v1/account >"$stripe_response"
-jq -e '.id | type == "string" and length > 0' "$stripe_response" >/dev/null
+  --request POST \
+  --header "authorization: Bearer ${SYNTHETIC_PROBE_TOKEN}" \
+  --max-time 30 \
+  "${app_url}/api/internal/synthetic-order" >"$synthetic_response"
+jq -e '
+  .status == "ok" and
+  .deleted == true and
+  (.amountTotal | type == "number" and . > 0)
+' "$synthetic_response" >/dev/null
 
-echo "Health, storefront, database, and read-only Stripe probes passed for $app_url."
+echo "Health, storefront, database, and synthetic-order probes passed for $app_url."

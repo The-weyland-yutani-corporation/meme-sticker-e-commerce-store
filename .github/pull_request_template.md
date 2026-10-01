@@ -16,8 +16,8 @@
 - [ ] Unit and integration tests
 - [ ] Production build
 - [ ] Security and dependency checks
-- [ ] Preview smoke test
+- [ ] Deployment/package smoke test
 
 ## Rollout and rollback
 
-<!-- Describe the canary signals and rollback behavior. -->
+<!-- Describe the production signals, compatibility constraints, and rollback behavior. -->

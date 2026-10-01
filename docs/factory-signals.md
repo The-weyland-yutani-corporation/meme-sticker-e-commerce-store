@@ -9,10 +9,10 @@ budgeted step.
 
 Signals are considered in this order:
 
-1. **P1 production:** failed production health probes or open production/release
-   incidents.
-2. **P2 main and factory reliability:** failed or stalled CI, CodeQL, factory
-   workflows, and queue drift.
+1. **P1 production:** failed Azure production probes, rollback failures,
+   unavailable telemetry, threshold breaches, or open production incidents.
+2. **P2 main, cost, and factory reliability:** Azure budget breaches or unknown
+   spend, failed or stalled CI, CodeQL, factory workflows, and queue drift.
 3. **P3 maintenance:** open high/critical Dependabot alerts, code-scanning
    alerts, and Dependabot pull requests that are failing or at least seven days
    old.
@@ -35,6 +35,15 @@ reuses the same issue across repeated observations. It updates an open issue
 only when the material evidence changes or the six-hour observation cooldown
 expires. Cleared signals are closed; recurrence reopens the same issue. This
 keeps durable history without comments or new issues for every scheduled run.
+
+Azure evidence uses stable fingerprints such as
+`azure-observability:production`, `production-health:api-health`, and
+`production-release:autonomous-controller`. The budget signal uses
+`azure-budget:production`. App Service HTTP 5xx and response time plus
+PostgreSQL CPU/storage are evaluated over bounded windows, and month-to-date
+Azure spend is compared with the configured $75 threshold. Missing Azure
+access, metric samples, or cost data is `unknown` and creates evidence; it is
+never interpreted as healthy.
 
 Dependency and security findings are aggregated into one maintenance signal
 rather than creating an issue per alert. Factory workflow failures are likewise
