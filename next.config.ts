@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: "standalone",
+  deploymentId: process.env.RELEASE_SHA,
   turbopack: {
     rules: {
       "*.css": {

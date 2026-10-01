@@ -746,7 +746,7 @@ collect_production() {
   evidence="$(
     jq -cn \
       --arg source "production-health" \
-      --arg health_url_configured "${PRODUCTION_HEALTH_URL:+true}" \
+      --arg health_url_configured "${APP_URL:+true}" \
       --argjson failed_run "$failed_run" \
       --argjson incidents "$incidents" \
       '{
@@ -773,6 +773,305 @@ collect_production() {
         incident_numbers:([$incidents[].number] | sort)
       }')"
   mark_evaluated "production"
+}
+
+collect_azure_observability() {
+  local app_id=""
+  local app_http_samples=0
+  local app_response_samples=0
+  local missing_variables=()
+  local postgres_id=""
+  local postgres_cpu_samples=0
+  local postgres_storage_samples=0
+  local metrics
+  local queries_ok=true
+  local http_5xx=0
+  local response_time_ms=0
+  local postgres_cpu=0
+  local postgres_storage=0
+  local state_key
+  local summary
+  local evidence
+
+  for variable_name in \
+    AZURE_CLIENT_ID \
+    AZURE_TENANT_ID \
+    AZURE_SUBSCRIPTION_ID \
+    AZURE_RESOURCE_GROUP \
+    AZURE_APP_NAME \
+    AZURE_POSTGRES_NAME; do
+    if [ -z "${!variable_name:-}" ]; then
+      missing_variables+=("$variable_name")
+    fi
+  done
+
+  if (( ${#missing_variables[@]} > 0 )); then
+    evidence="$(
+      printf '%s\n' "${missing_variables[@]}" |
+        jq -Rsc '
+          split("\n")[:-1] as $missing |
+          {
+            source:"azure-monitor",
+            queries_ok:false,
+            missing_configuration:$missing
+          }
+        '
+    )"
+    upsert_signal \
+      "P1" \
+      "azure-observability" \
+      "azure-observability:production" \
+      "[factory signal] Azure production telemetry requires attention" \
+      "Azure production telemetry is not fully configured; health is unknown." \
+      "$evidence" \
+      "Configure the missing GitHub production-environment variables and verify Azure OIDC telemetry access before closure." \
+      "signal:production,signal:priority-1,factory:incident" \
+      "$(jq -c '{queries_ok,missing_configuration}' <<<"$evidence")"
+    mark_evaluated "azure-observability"
+    return
+  fi
+
+  if ! app_id="$(
+    az webapp show \
+      --resource-group "$AZURE_RESOURCE_GROUP" \
+      --name "$AZURE_APP_NAME" \
+      --query id \
+      --output tsv
+  )"; then
+    queries_ok=false
+  fi
+  if ! postgres_id="$(
+    az postgres flexible-server show \
+      --resource-group "$AZURE_RESOURCE_GROUP" \
+      --name "$AZURE_POSTGRES_NAME" \
+      --query id \
+      --output tsv
+  )"; then
+    queries_ok=false
+  fi
+
+  if [ -n "$app_id" ]; then
+    if metrics="$(
+      az monitor metrics list \
+        --resource "$app_id" \
+        --metric Http5xx AverageResponseTime \
+        --interval PT5M \
+        --aggregation Total Average \
+        --offset 30m \
+        --output json
+    )"; then
+      http_5xx="$(
+        jq '[.value[] | select(.name.value == "Http5xx") | .timeseries[].data[].total // 0] | add // 0' \
+          <<<"$metrics"
+      )"
+      response_time_ms="$(
+        jq '[.value[] | select(.name.value == "AverageResponseTime") | .timeseries[].data[].average // 0] | max // 0 | . * 1000' \
+          <<<"$metrics"
+      )"
+      app_http_samples="$(
+        jq '[.value[] | select(.name.value == "Http5xx") | .timeseries[].data[] | select(.total != null)] | length' \
+          <<<"$metrics"
+      )"
+      app_response_samples="$(
+        jq '[.value[] | select(.name.value == "AverageResponseTime") | .timeseries[].data[] | select(.average != null)] | length' \
+          <<<"$metrics"
+      )"
+      if (( app_http_samples == 0 || app_response_samples == 0 )); then
+        queries_ok=false
+      fi
+    else
+      queries_ok=false
+    fi
+  fi
+
+  if [ -n "$postgres_id" ]; then
+    if metrics="$(
+      az monitor metrics list \
+        --resource "$postgres_id" \
+        --metric cpu_percent storage_percent \
+        --interval PT5M \
+        --aggregation Average \
+        --offset 30m \
+        --output json
+    )"; then
+      postgres_cpu="$(
+        jq '[.value[] | select(.name.value == "cpu_percent") | .timeseries[].data[].average // 0] | max // 0' \
+          <<<"$metrics"
+      )"
+      postgres_storage="$(
+        jq '[.value[] | select(.name.value == "storage_percent") | .timeseries[].data[].average // 0] | max // 0' \
+          <<<"$metrics"
+      )"
+      postgres_cpu_samples="$(
+        jq '[.value[] | select(.name.value == "cpu_percent") | .timeseries[].data[] | select(.average != null)] | length' \
+          <<<"$metrics"
+      )"
+      postgres_storage_samples="$(
+        jq '[.value[] | select(.name.value == "storage_percent") | .timeseries[].data[] | select(.average != null)] | length' \
+          <<<"$metrics"
+      )"
+      if (( postgres_cpu_samples == 0 || postgres_storage_samples == 0 )); then
+        queries_ok=false
+      fi
+    else
+      queries_ok=false
+    fi
+  fi
+
+  if [ "$queries_ok" = true ] &&
+    awk "BEGIN { exit !($http_5xx <= 5 && $response_time_ms <= 1200 && $postgres_cpu <= 90 && $postgres_storage <= 80) }"; then
+    mark_evaluated "azure-observability"
+    return
+  fi
+
+  if [ "$queries_ok" = true ]; then
+    summary="Azure production metrics exceeded one or more factory thresholds."
+  else
+    summary="Azure production telemetry could not be collected completely; health is unknown."
+  fi
+  evidence="$(
+    jq -cn \
+      --arg app_id "$app_id" \
+      --arg postgres_id "$postgres_id" \
+      --arg queries_ok "$queries_ok" \
+      --argjson http_5xx "$http_5xx" \
+      --argjson http_5xx_samples "$app_http_samples" \
+      --argjson postgres_cpu "$postgres_cpu" \
+      --argjson postgres_cpu_samples "$postgres_cpu_samples" \
+      --argjson postgres_storage "$postgres_storage" \
+      --argjson postgres_storage_samples "$postgres_storage_samples" \
+      --argjson response_time_ms "$response_time_ms" \
+      --argjson response_time_samples "$app_response_samples" \
+      '{
+        source:"azure-monitor",
+        queries_ok:($queries_ok == "true"),
+        app_service:{
+          resource_id:$app_id,
+          http_5xx_30m:$http_5xx,
+          http_5xx_samples_30m:$http_5xx_samples,
+          response_time_samples_30m:$response_time_samples,
+          max_response_time_ms_30m:$response_time_ms
+        },
+        postgresql:{
+          resource_id:$postgres_id,
+          max_cpu_percent_30m:$postgres_cpu,
+          cpu_samples_30m:$postgres_cpu_samples,
+          max_storage_percent_30m:$postgres_storage,
+          storage_samples_30m:$postgres_storage_samples
+        },
+        thresholds:{
+          http_5xx_max:5,
+          response_time_ms_max:1200,
+          postgres_cpu_percent_max:90,
+          postgres_storage_percent_max:80
+        }
+      }'
+  )"
+  state_key="$(jq -c '{queries_ok,app_service,postgresql}' <<<"$evidence")"
+  upsert_signal \
+    "P1" \
+    "azure-observability" \
+    "azure-observability:production" \
+    "[factory signal] Azure production telemetry requires attention" \
+    "$summary" \
+    "$evidence" \
+    "Protect production first. Verify Azure telemetry access, then repair the smallest application, database, or infrastructure cause and require healthy metrics before closure." \
+    "signal:production,signal:priority-1,factory:incident" \
+    "$state_key"
+  mark_evaluated "azure-observability"
+}
+
+collect_azure_budget() {
+  local budget_json=""
+  local budget_name="meme-forge-production"
+  local evidence
+  local spend=""
+  local state_key
+  local summary
+  local threshold="${AZURE_MONTHLY_BUDGET_USD:-}"
+
+  if [ -z "${AZURE_SUBSCRIPTION_ID:-}" ] || [ -z "$threshold" ]; then
+    evidence="$(
+      jq -cn \
+        --arg subscription_configured "${AZURE_SUBSCRIPTION_ID:+true}" \
+        --arg threshold_configured "${threshold:+true}" \
+        '{
+          source:"azure-cost-management",
+          queries_ok:false,
+          subscription_configured:($subscription_configured == "true"),
+          threshold_configured:($threshold_configured == "true")
+        }'
+    )"
+    summary="The Azure production budget signal is not fully configured; spend is unknown."
+  elif budget_json="$(
+    az consumption budget show \
+      --budget-name "$budget_name" \
+      --output json
+  )"; then
+    spend="$(jq -r '.currentSpend.amount // .properties.currentSpend.amount // empty' <<<"$budget_json")"
+    if [[ "$spend" =~ ^[0-9]+([.][0-9]+)?$ ]] &&
+      [[ "$threshold" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+      if awk "BEGIN { exit !($spend <= $threshold) }"; then
+        mark_evaluated "azure-budget"
+        return
+      fi
+      evidence="$(
+        jq -cn \
+          --arg budget_name "$budget_name" \
+          --argjson spend "$spend" \
+          --argjson threshold "$threshold" \
+          '{
+            source:"azure-cost-management",
+            queries_ok:true,
+            budget_name:$budget_name,
+            month_to_date_spend_usd:$spend,
+            monthly_threshold_usd:$threshold
+          }'
+      )"
+      summary="Azure production month-to-date spend exceeded the configured monthly threshold."
+    else
+      evidence="$(
+        jq -cn \
+          --arg budget_name "$budget_name" \
+          --arg spend "$spend" \
+          --arg threshold "$threshold" \
+          '{
+            source:"azure-cost-management",
+            queries_ok:false,
+            budget_name:$budget_name,
+            observed_spend:$spend,
+            configured_threshold:$threshold
+          }'
+      )"
+      summary="Azure production budget data could not be interpreted; spend is unknown."
+    fi
+  else
+    evidence="$(
+      jq -cn \
+        --arg budget_name "$budget_name" \
+        --arg threshold "$threshold" \
+        '{
+          source:"azure-cost-management",
+          queries_ok:false,
+          budget_name:$budget_name,
+          configured_threshold:$threshold
+        }'
+    )"
+    summary="Azure production budget data could not be collected; spend is unknown."
+  fi
+
+  state_key="$(jq -c '.' <<<"$evidence")"
+  upsert_signal \
+    "P2" \
+    "azure-budget" \
+    "azure-budget:production" \
+    "[factory signal] Azure production budget requires attention" \
+    "$summary" \
+    "$evidence" \
+    "Verify Cost Management access and the production budget, then reduce or rightsize the smallest safe cost driver before closure." \
+    "signal:production,signal:priority-2,factory:incident" \
+    "$state_key"
+  mark_evaluated "azure-budget"
 }
 
 collect_queue_drift() {
@@ -961,5 +1260,7 @@ collect_main_checks
 collect_factory_workflows
 collect_dependency_security
 collect_production
+collect_azure_observability
+collect_azure_budget
 collect_queue_drift
 close_cleared_signals
