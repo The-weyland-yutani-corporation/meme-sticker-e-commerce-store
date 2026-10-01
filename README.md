@@ -58,3 +58,9 @@ The unattended loop still requires a one-time owner to configure GitHub,
 Vercel, PostgreSQL, Stripe, billing, secrets, repository rules, and DNS. After
 that, routine implementation, review, merge, deployment, rollback, and incident
 repair are designed to run without human approval.
+
+The scheduled release controller reconciles the latest main SHA against GitHub
+Deployments, validates additive migrations, gates production on staging and
+safe read-only probes, records deployment evidence, and aborts/rolls back a
+failed new production rollout. Exact environment variables, secrets, and outage
+behavior are documented in [docs/factory-bootstrap.md](docs/factory-bootstrap.md).
