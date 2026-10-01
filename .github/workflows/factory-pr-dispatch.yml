@@ -9,7 +9,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
   statuses: write
@@ -275,10 +275,13 @@ jobs:
               return 0
 
             if [ "$(jq -r '.mergeable_state' <<<"$pr_api")" = "behind" ]; then
-              gh api \
+              if ! gh api \
                 --method PUT \
                 "repos/$REPOSITORY/pulls/$pr_number/update-branch" \
-                -f expected_head_sha="$head_sha" >/dev/null
+                -f expected_head_sha="$head_sha" >/dev/null; then
+                echo "::warning title=Factory branch update failed::Pull request #$pr_number could not be synchronized with the default branch."
+                return 2
+              fi
               echo "::notice title=Factory branch updated::Pull request #$pr_number was synchronized with the default branch; exact-head gates will be dispatched on the next reconciliation."
               return 0
             fi
