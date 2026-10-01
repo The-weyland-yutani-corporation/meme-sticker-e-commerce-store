@@ -56,10 +56,11 @@ jobs:
             local body="$3"
             if gh api \
               --paginate \
-              "repos/$REPOSITORY/issues/$issue_number/comments" \
-              --jq --arg marker "$marker" '
+              --slurp \
+              "repos/$REPOSITORY/issues/$issue_number/comments" |
+              jq -r --arg marker "$marker" '
                 any(
-                  .[];
+                  .[][];
                   .user.login == "github-actions[bot]" and
                   (.body | contains($marker))
                 )
@@ -117,13 +118,13 @@ jobs:
             --label "factory:managed" \
             --limit 100 \
             --json number,state,mergedAt,headRefName,headRefOid \
-            --jq '.[] | [.number, .state, (.mergedAt // ""), .headRefName, .headRefOid] | @tsv' |
+            --jq '.[] | [.number, .state, (.mergedAt // "-"), .headRefName, .headRefOid] | @tsv' |
           while IFS=$'\t' read -r pr_number state merged_at head_ref head_sha; do
             [ -n "$pr_number" ] || continue
             issue_number="$(provenance_issue "$pr_number")"
             [ -n "$issue_number" ] || continue
 
-            if [ -n "$merged_at" ]; then
+            if [ "$merged_at" != "-" ]; then
               gh issue edit "$issue_number" \
                 --repo "$REPOSITORY" \
                 --remove-label "factory:active" \
