@@ -274,6 +274,15 @@ jobs:
               <<<"$labels" >/dev/null ||
               return 0
 
+            if [ "$(jq -r '.mergeable_state' <<<"$pr_api")" = "behind" ]; then
+              gh api \
+                --method PUT \
+                "repos/$REPOSITORY/pulls/$pr_number/update-branch" \
+                -f expected_head_sha="$head_sha" >/dev/null
+              echo "::notice title=Factory branch updated::Pull request #$pr_number was synchronized with the default branch; exact-head gates will be dispatched on the next reconciliation."
+              return 0
+            fi
+
             local context
             context="$(
               jq -cn \
