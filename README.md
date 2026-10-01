@@ -52,6 +52,12 @@ The policy in `.factory/policy.yml` defines WIP, retry, diff, risk, and rollout
 limits. Changes to the policy and compiled factory workflows are deliberately
 outside the implementation agent's allowed file set.
 
+The conventional [factory signal collector](docs/factory-signals.md) ingests
+failed main checks, factory workflow failures, dependency/security maintenance,
+production incidents, and queue drift into deduplicated evidence issues. The
+AI intent planner only converts current evidence into work when policy capacity
+exists.
+
 ## One-time bootstrap
 
 The unattended loop still requires a one-time owner to configure GitHub,
