@@ -12,6 +12,7 @@ permissions:
   contents: read
   issues: write
   pull-requests: write
+  statuses: write
 
 concurrency:
   group: factory-pr-dispatch
@@ -137,7 +138,8 @@ jobs:
             local workflow="$1"
             local head_ref="$2"
             local head_sha="$3"
-            shift 3
+            local status_context="$4"
+            shift 4
 
             local runs
             runs="$(
@@ -146,8 +148,55 @@ jobs:
                 --workflow "$workflow" \
                 --branch "$head_ref" \
                 --limit 30 \
-                --json headSha,status,conclusion
+                --json databaseId,headSha,status,conclusion,url
             )"
+            local current_run
+            current_run="$(
+              jq -c --arg sha "$head_sha" '
+                (
+                  [
+                    .[] |
+                    select(.headSha == $sha) |
+                    select(
+                      .status == "queued" or
+                      .status == "in_progress" or
+                      .status == "waiting" or
+                      .status == "requested" or
+                      .status == "pending" or
+                      .conclusion == "success"
+                    )
+                  ][0] //
+                  [.[] | select(.headSha == $sha)][0] //
+                  {}
+                )
+              ' <<<"$runs"
+            )"
+            if [ -n "$status_context" ] &&
+              [ "$(jq -r '.databaseId // empty' <<<"$current_run")" != "" ]; then
+              local run_status conclusion state description
+              run_status="$(jq -r '.status' <<<"$current_run")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"$current_run")"
+              state=pending
+              description="$status_context is running for the exact pull request head."
+              if [ "$run_status" = "completed" ]; then
+                if [ "$conclusion" = "success" ]; then
+                  state=success
+                  description="$status_context passed for the exact pull request head."
+                else
+                  state=failure
+                  description="$status_context failed for the exact pull request head."
+                fi
+              fi
+
+              gh api \
+                --method POST \
+                "repos/$REPOSITORY/statuses/$head_sha" \
+                -f state="$state" \
+                -f context="$status_context" \
+                -f description="$description" \
+                -f target_url="$(jq -r '.url' <<<"$current_run")" >/dev/null
+            fi
+
             local existing
             existing="$(
               jq --arg sha "$head_sha" '
@@ -239,20 +288,22 @@ jobs:
             )"
 
             local dispatch_failed=0
-            dispatch_once "ci.yml" "$head_ref" "$head_sha" ||
+            dispatch_once "ci.yml" "$head_ref" "$head_sha" "Validate" ||
               dispatch_failed=1
-            dispatch_once "codeql.yml" "$head_ref" "$head_sha" ||
+            dispatch_once "codeql.yml" "$head_ref" "$head_sha" "Analyze" ||
               dispatch_failed=1
             dispatch_once \
               "factory-review.lock.yml" \
               "$head_ref" \
               "$head_sha" \
+              "" \
               -f "aw_context=$context" ||
               dispatch_failed=1
             dispatch_once \
               "factory-security-review.lock.yml" \
               "$head_ref" \
               "$head_sha" \
+              "" \
               -f "aw_context=$context" ||
               dispatch_failed=1
             [ "$dispatch_failed" -eq 0 ]
