@@ -282,6 +282,10 @@ jobs:
                 echo "::warning title=Factory branch update failed::Pull request #$pr_number could not be synchronized with the default branch."
                 return 2
               fi
+              gh pr edit "$pr_number" \
+                --repo "$REPOSITORY" \
+                --remove-label "factory:reviewed" \
+                --remove-label "factory:security-reviewed" || true
               echo "::notice title=Factory branch updated::Pull request #$pr_number was synchronized with the default branch; exact-head gates will be dispatched on the next reconciliation."
               return 0
             fi
