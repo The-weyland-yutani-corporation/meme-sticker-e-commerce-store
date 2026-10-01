@@ -74,15 +74,15 @@ export function Storefront({ products }: { products: readonly Product[] }) {
         }),
       });
       const result = (await response.json()) as {
-        url?: string;
+        confirmationUrl?: string;
         error?: string;
       };
 
-      if (!response.ok || !result.url) {
+      if (!response.ok || !result.confirmationUrl) {
         throw new Error(result.error ?? "Checkout could not be started.");
       }
 
-      window.location.assign(result.url);
+      window.location.assign(result.confirmationUrl);
     } catch (error) {
       setCheckoutError(
         error instanceof Error ? error.message : "Checkout could not be started.",
@@ -399,7 +399,7 @@ export function Storefront({ products }: { products: readonly Product[] }) {
                 <span>Subtotal</span>
                 <strong>{formatMoney(subtotal)}</strong>
               </div>
-              <p>Taxes and shipping calculated by Stripe Checkout.</p>
+              <p>No payment is collected. This creates a test order only.</p>
               {checkoutError && (
                 <p className="checkout-error" role="alert">
                   {checkoutError}
@@ -411,7 +411,7 @@ export function Storefront({ products }: { products: readonly Product[] }) {
                 onClick={checkout}
                 disabled={!cartItems.length || checkingOut}
               >
-                {checkingOut ? "Opening Stripe…" : "Secure checkout"}
+                {checkingOut ? "Creating order…" : "Create test order"}
                 <ArrowRight size={18} />
               </button>
             </div>

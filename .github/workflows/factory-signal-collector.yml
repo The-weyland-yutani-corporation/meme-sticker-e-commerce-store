@@ -8,6 +8,7 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write
   issues: write
   pull-requests: read
   security-events: read
@@ -21,15 +22,31 @@ jobs:
     name: Collect deterministic signals
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: production
     env:
+      APP_URL: ${{ vars.APP_URL }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_MONTHLY_BUDGET_USD: ${{ vars.AZURE_MONTHLY_BUDGET_USD }}
+      AZURE_POSTGRES_NAME: ${{ vars.AZURE_POSTGRES_NAME }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       GH_TOKEN: ${{ github.token }}
-      PRODUCTION_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
       REPOSITORY: ${{ github.repository }}
       SIGNAL_COOLDOWN_HOURS: "6"
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sign in to Azure with OIDC
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != ''
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Collect repository and production signals
         shell: bash

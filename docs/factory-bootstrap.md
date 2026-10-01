@@ -1,190 +1,159 @@
 # Dark factory bootstrap
 
-These are one-time owner actions. Routine changes must not require these
-credentials in implementation or review jobs.
+These are one-time owner actions. Routine implementation, governance, review,
+merge, deployment, monitoring, rollback, and repair jobs must not require owner
+credentials.
 
-## GitHub
+## GitHub safety boundary
 
 1. Enable Actions, Issues, Dependabot, and secret scanning.
-2. Install the `gh-aw` extension and compile each `.github/workflows/factory-*.md`.
-3. Commit each generated `.lock.yml`.
-   Use the repository-compatible `gh-aw` compiler version `v0.88.8` and compile
-   with `--action-mode action --action-tag
-   5e508589e03a7757a7e05b26e834292f5445bfb6`. Commit
-   `.github/aw/actions-lock.json` with the generated workflows. This preserves
-   the validated runtime while pinning `github/gh-aw-actions/setup` to the
-   immutable commit behind release `v0.88.8`.
-4. Create a `main` ruleset that:
-   - requires pull requests;
-   - requires `CI / Validate` and `CodeQL / Analyze`;
-   - handles merge queue events;
-   - blocks force pushes and deletion;
-   - does not require human approval.
-   The included CodeQL job uses local SARIF enforcement so it also works when
-   GitHub Advanced Security is not licensed for a private repository.
-5. Create the labels referenced by `.factory/policy.yml` and the workflows.
-6. Set the repository's default workflow permissions to **Read and write** and
-   enable **Allow GitHub Actions to create and approve pull requests**. No
-   personal token or GitHub App credential is required.
+2. Keep default workflow permissions at **Read and write** and enable
+   **Allow GitHub Actions to create and approve pull requests**.
+3. Compile gh-aw source workflows with `gh-aw v0.88.8` and:
 
-The conventional `Factory queue dispatcher` performs a low-cost 15-minute
-reconciliation and invokes the AI implementer only when a ready/repair issue
-exists, the WIP limit allows it, and no implementer is already active. It passes
-the selected issue through `aw_context`, records bounded attempts, and uses the
-workflow token for explicit `workflow_dispatch`. The implementer has no direct
-issue-event activation or collaborator role check; GitHub's Actions permission
-and the dispatcher context form the activation boundary.
+   ```text
+   --action-mode action --action-tag 5e508589e03a7757a7e05b26e834292f5445bfb6
+   ```
 
-Pull requests created with the workflow token cannot rely on recursive events:
-enterprise policy may mark their `pull_request` runs `action_required`, and
-token-created events may be suppressed. The conventional PR controller
-therefore reconciles open factory PRs every five minutes and explicitly starts
-CI, CodeQL, correctness review, and security review against the current head.
-Event triggers are latency optimizations only.
+4. Apply the organization required-workflow ruleset documented in
+   `The-weyland-yutani-corporation/dark-factory-kernel`. The required workflow
+   is the immutable authorization boundary for this self-modifying repository.
+5. Require pull requests and the `Validate` and `Analyze` contexts, block force
+   pushes and deletion, allow squash merge, and require no human approval.
+6. After external enforcement is verified, delete
+   `FACTORY_ROOT_BOOTSTRAP_SHA`. Delete the obsolete
+   `DARK_FACTORY_MAGE_APP_ID`; the factory does not use a GitHub App or PAT.
 
-The queue dispatcher records the exact implementer run ID on the selected
-issue. The PR controller verifies that run, downloads its SafeOutputs artifact,
-requires an exact `create_pull_request` item for the candidate PR, checks the
-gh-aw provenance footer and same-repository branch, and writes a trusted
-PR-to-issue marker. It does not rely on GitHub's closing-issue GraphQL field,
-which can be empty for workflow-token PRs even when their body contains
-`Closes #<issue>`.
+The scheduled queue, pull-request, lifecycle, attestation, signal, and release
+controllers are authoritative. Recursive events from `GITHUB_TOKEN` are latency
+optimizations only.
 
-The one-time migration away from GitHub App authentication is authorized only
-when `FACTORY_TOKENLESS_MIGRATION_SHA` exactly matches the migration PR head.
-This exception is non-reusable and exists separately from the consumed initial
-bootstrap exception.
+## Azure owner bootstrap
 
-Implementation pull requests are opened ready for review and include a closing
-keyword for readability. The scheduled lifecycle controller uses the trusted
-provenance marker to close merged source issues explicitly, releases
-failed/no-output runs for another bounded attempt, and returns closed or
-review-rejected work to `factory:repair`.
+The selected production topology is one direct-production Azure App Service and
+one Azure Database for PostgreSQL Flexible Server in East US 2. There is no
+staging environment or deployment slot.
 
-Control-plane changes use a separate agent governance lane. They must carry the
-`factory:governance` label, update source and compiled lock files together,
-pass deterministic CI/CodeQL, and receive independent correctness and security
-PASS verdicts bound to the current head SHA. The ordinary implementation agent
-cannot edit `.github/**` or `.factory/**`.
+Prerequisites:
 
-The attestation reconciler enforces `factory:governance` whenever a pull request
-changes control-plane paths, validates both PASS comments against successful
-reviewer runs for the exact current head, and performs a direct squash merge. It
-never leaves persistent auto-merge armed across later commits.
+- Azure CLI and GitHub CLI are authenticated as an owner who can create a
+  resource group, user-assigned identity, federated credential, role
+  assignment, budget, and repository environment variables.
+- The active Azure subscription is approved for billable resources.
+- The GitHub organization required-workflow ruleset is active.
 
-The policy, issue/PR dispatch controllers, independent reviewer definitions,
-generated reviewer workflows, and attestation controller are root controls.
-The initial dark-factory bootstrap establishes them once; ordinary
-implementation and governance agents must not modify them afterward.
+Run from the repository root:
 
-To authorize that one-time root-control bootstrap without weakening steady-state
-automation, set the repository variable `FACTORY_ROOT_BOOTSTRAP_SHA` to the exact
-head commit of the bootstrap pull request. The attestation controller refuses to
-merge root-control changes at every other SHA. Delete the variable after the
-bootstrap merges; the default Actions token is not granted repository-variable
-administration.
+```powershell
+.\scripts\azure\bootstrap-production.ps1 -SubscriptionId "<azure-subscription-id>"
+```
 
-The conventional `Factory queue dispatcher` performs a low-cost 15-minute
-reconciliation and invokes the AI implementer only when a ready/repair issue
-exists and no implementation PR is active. Scheduled agent runs should not be
-used as idle polling.
+The script:
 
-Control-plane changes use a separate agent governance lane. They must carry the
-`factory:governance` label, update source and compiled lock files together,
-pass deterministic CI/CodeQL, and receive independent correctness and security
-PASS verdicts bound to the current head SHA. The ordinary implementation agent
-cannot edit `.github/**` or `.factory/**`.
+- creates `rg-meme-forge-production` in East US 2;
+- creates a user-assigned Azure identity and GitHub OIDC federation scoped to
+  the repository's `production` environment;
+- grants the identity Contributor on the dedicated resource group, Storage Blob
+  Data Contributor on the release-package account, and Cost Management Reader
+  on the subscription;
+- deploys `infra/main.bicep`;
+- creates PostgreSQL and synthetic-probe secrets in Key Vault;
+- restricts PostgreSQL to current App Service outbound addresses;
+- creates the GitHub `production` environment with no reviewers;
+- writes non-secret Azure resource identifiers as environment variables; and
+- creates a $75 monthly Azure budget.
 
-The attestation reconciler enforces `factory:governance` whenever a pull request
-changes control-plane paths, validates both PASS comments against successful
-reviewer runs for the exact current head, and performs a direct squash merge. It
-never leaves persistent auto-merge armed across later commits.
+The release controller uses Azure AD data-plane access for package blobs; shared
+storage-account keys are disabled. The script intentionally creates no Azure
+client secret, publish profile, `AZURE_CREDENTIALS` secret, database secret in
+GitHub, or reusable cloud token.
 
-The policy, independent reviewer definitions, generated reviewer workflows, and
-attestation controller are root controls. The initial dark-factory bootstrap
-establishes them once; ordinary implementation and governance agents must not
-modify them afterward.
+## Azure production resources
 
-To authorize that one-time root-control bootstrap without weakening steady-state
-automation, set the repository variable `FACTORY_ROOT_BOOTSTRAP_SHA` to the exact
-head commit of the bootstrap pull request. The attestation controller refuses to
-merge root-control changes at every other SHA. Delete the variable after the
-bootstrap merges; the default Actions token is not granted repository-variable
-administration.
+`infra/main.bicep` manages:
 
-## Providers
+- Linux App Service Basic plan and production Web App;
+- PostgreSQL Flexible Server burstable compute, 32 GiB storage, TLS, and
+  seven-day backups;
+- Key Vault and App Service Key Vault references;
+- private release-package blob container with versioning and soft deletion;
+- Log Analytics and workspace-based Application Insights;
+- availability test, App Service HTTP 5xx alert, PostgreSQL storage alert, and
+  action group.
 
-The conventional `Autonomous release controller` is the only scheduled release
-loop. Every 15 minutes (and on `workflow_dispatch`) it compares the latest main
-SHA with successful GitHub production Deployments. A missing deployment is
-released through staging and production; an already deployed SHA receives
-ongoing health checks. Push delivery is not the source of truth.
+`infra/**` is governance-controlled. Agents may change it only through the
+governance lane, current-head deterministic checks, independent correctness and
+security reviews, attestation, and the external kernel.
 
-1. Connect the repository to Vercel and create a custom `staging` environment.
-2. Configure Vercel rolling release stages at 5%, 25%, 50%, and 100%.
-3. Configure both `staging` and `production` GitHub environments. Do not add
-   required reviewers because the controller is unattended.
-4. Add these variables to each GitHub environment:
-   - `APP_URL`: the stable HTTPS origin for that environment;
-   - `VERCEL_ORG_ID`: the Vercel `team_...` or `user_...` ID;
-   - `VERCEL_PROJECT_ID`: the Vercel `prj_...` project ID.
-5. Add these secrets to each GitHub environment:
-   - `VERCEL_TOKEN`: a token limited to the project/team;
-   - `DATABASE_URL`: the environment-specific PostgreSQL connection URL;
-   - `STRIPE_SECRET_KEY`: `sk_test_...` in staging; production may remain in
-     test mode until live commerce is intentionally enabled;
-   - `STRIPE_WEBHOOK_SECRET`: the environment-specific `whsec_...` secret.
-   - Optional `VERCEL_AUTOMATION_BYPASS_SECRET`: the environment's deployment
-     protection bypass secret when Vercel protection would otherwise reject
-     controller probes.
-6. Configure the matching Vercel environment variables `APP_URL`,
-   `DATABASE_URL`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET`. The GitHub
-   copies are used only for migrations and non-transactional release probes;
-   Vercel's copies are the application runtime configuration.
-7. Provision independent staging and production PostgreSQL databases and apply
-   least-privilege/network controls that still permit GitHub-hosted runners.
-8. Register separate Stripe webhook endpoints for the staging and production
-   origins at `/api/stripe/webhook`.
+## Production release model
 
-The controller fails closed when any required value is absent or malformed.
-It also pulls Vercel's selected environment before migration and confirms the
-four required runtime keys exist without printing their values. Staging must
-use a Stripe test secret. Release probes only perform HTTP GETs, `prisma migrate
-status`, and Stripe's read-only account retrieval API. They never create
-Checkout Sessions, PaymentIntents, test clocks, refunds, or live card charges.
+Every 15 minutes, `release-health.yml` reconciles the latest `main` SHA against
+successful GitHub production Deployments.
 
-Database migrations are applied before each deployment only after the
-controller verifies that previously deployed migrations were not changed and
-that new SQL contains no destructive/rollback-unsafe statements. Schema
-changes must use an additive expand/migrate/contract sequence across separate
-releases.
+For an undeployed SHA, the controller:
 
-After staging migration, deployment, and probes pass, the controller deploys
-the exact same main SHA with Vercel's production target. GitHub Deployment
-statuses and retained JSON evidence record the SHA, URLs, previous production,
-workflow run, timestamp, and outcome.
+1. signs in to Azure through GitHub OIDC;
+2. reads PostgreSQL and synthetic-probe values from Key Vault;
+3. validates and applies Bicep;
+4. builds one Next.js standalone package stamped with the exact SHA;
+5. uploads the immutable package to Azure Storage;
+6. temporarily permits the GitHub runner IP for migration and removes the rule
+   in an `always()` cleanup step;
+7. rejects changed or destructive migrations and runs `prisma migrate deploy`;
+8. deploys directly to the production App Service;
+9. verifies `/api/health`, storefront HTML, migration state, and a tagged
+   synthetic order that is created, read, deleted, and rechecked; and
+10. records the package, SHA, previous package, Azure URL, run, probes, and
+    outcome in GitHub Deployments and retained JSON evidence.
 
-If the new production health gate fails, the controller first aborts any active
-Vercel rolling release and then rolls back to the URL from the previous
-successful GitHub production Deployment. Additive migrations remain in place
-and must be backward-compatible with the restored application. If Vercel is
-unavailable, abort/rollback errors are preserved in the failed run and the
-deduplicated `[factory signal] Autonomous release controller blocked` issue
-is updated with `factory:incident`, `factory:repair`, and `factory:signal`.
+There is no database rollback. Migrations must remain compatible with the
+previous application. If a newly deployed application fails a gate, the
+controller redeploys the last successful immutable package and verifies its SHA
+and health. It then opens or updates one P1 `factory:incident` +
+`factory:repair` signal. If rollback also fails, the run fails closed.
 
-Scheduled failures for an already deployed SHA abort an active rollout but do
-not blindly roll back: a provider, network, database, or Stripe outage is not
-enough evidence that the prior application version is safer. Recovery closes
-the open release incident. If no previous successful production Deployment URL
-exists, the first production promotion fails closed rather than claiming an
-automatic rollback succeeded.
+For an already-deployed SHA, scheduled probes monitor production but do not
+blindly roll back on a provider, database, or network outage that is not
+attributable to a new release.
+
+## Payment-free commerce
+
+The live store creates payment-free test orders. Prices and totals are resolved
+from the server catalog, and order/items are written transactionally.
+
+Stripe is not active in this stage. Legacy Stripe database fields remain only
+to keep the migration additive. The old webhook returns `410 Gone`.
+
+The synthetic probe uses a Key Vault-backed bearer token, contains no customer
+PII, reuses the real order service, and deletes its tagged order after
+verification.
+
+## Production signals
+
+The deterministic signal collector signs in with the same OIDC identity and
+queries Azure Monitor for:
+
+- App Service HTTP 5xx count and response time;
+- PostgreSQL CPU and storage pressure;
+- current Azure month-to-date spend against the $75 monthly threshold;
+- release-controller failures and open incidents; and
+- unavailable Azure telemetry, which is treated as unknown rather than healthy.
+
+Application Insights, availability tests, alert resources, GitHub Deployment
+evidence, and the release controller supply the production evidence used by the
+intent planner and auditor.
 
 ## Proving exercises
 
-- Put prompt-injection text in an issue and verify tool/file scope does not widen.
-- Break lint, type checking, tests, and build separately.
-- Create a merge conflict and verify bounded repair behavior.
-- Replay a Stripe event and verify no duplicate transition occurs.
-- Fail `/api/health` during a rolling release and verify abort plus incident issue.
-- Attempt to edit `.factory/policy.yml` from the implementer workflow and verify
-  the patch is rejected or converted into an issue.
+- Put prompt-injection text in an issue and verify tool/file scope does not
+  widen.
+- Break lint, type checking, tests, build, Bicep, and migration policy
+  separately.
+- Attempt to modify `infra/**` from the implementation lane.
+- Fail `/api/health` after deployment and verify previous-package redeployment.
+- Remove a Key Vault secret and verify the controller fails closed.
+- Fail PostgreSQL firewall cleanup and verify deployment does not proceed.
+- Elevate 5xx, latency, database storage, and budget evidence and verify stable
+  signal fingerprints.
+- Run the controllers with a healthy deployment and empty queue and verify no
+  duplicate deployment or AI work occurs.

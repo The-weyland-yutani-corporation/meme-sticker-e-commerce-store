@@ -1,7 +1,7 @@
 # Meme Forge
 
 A dark-themed meme sticker store built with Next.js, TypeScript, PostgreSQL,
-Stripe Checkout, and an agent-driven GitHub delivery factory.
+Azure App Service, and an agent-driven GitHub delivery factory.
 
 ## Local development
 
@@ -12,9 +12,8 @@ npm run db:generate
 npm run dev
 ```
 
-The storefront works without provider credentials. Checkout intentionally
-returns `503` until `APP_URL`, `DATABASE_URL`, and Stripe test credentials are
-configured.
+The storefront works without cloud credentials. Checkout creates a
+payment-free test order when `DATABASE_URL` is configured.
 
 ## Commands
 
@@ -27,18 +26,17 @@ npm run build
 npm run check
 ```
 
-## Database and Stripe
+## Database and test orders
 
 1. Provision a PostgreSQL database and set `DATABASE_URL`.
 2. Run `npx prisma migrate dev --name init`.
-3. Add `STRIPE_SECRET_KEY`.
-4. Forward Stripe events to `/api/stripe/webhook` and add
-   `STRIPE_WEBHOOK_SECRET`.
-5. Set `APP_URL` to the deployed origin.
+3. Set `APP_URL` to the deployed origin.
+4. Set `SYNTHETIC_PROBE_TOKEN` only when exercising the internal production
+   probe.
 
 Checkout prices are resolved from the server-side catalog, not accepted from
-the browser. Stripe events are signature-verified and stored by event ID before
-order transitions, making retries idempotent.
+the browser. Order and item creation is transactional, no payment is collected,
+and fulfillment remains mocked.
 
 ## Factory model
 
@@ -60,13 +58,15 @@ exists.
 
 ## One-time bootstrap
 
-The unattended loop still requires a one-time owner to configure GitHub,
-Vercel, PostgreSQL, Stripe, billing, secrets, repository rules, and DNS. After
-that, routine implementation, review, merge, deployment, rollback, and incident
-repair are designed to run without human approval.
+The unattended loop still requires a one-time owner to configure the external
+GitHub ruleset and run the Azure OIDC/Bicep bootstrap. After that, routine
+implementation, review, merge, infrastructure reconciliation, deployment,
+rollback, monitoring, and incident repair are designed to run without human
+approval.
 
 The scheduled release controller reconciles the latest main SHA against GitHub
-Deployments, validates additive migrations, gates production on staging and
-safe read-only probes, records deployment evidence, and aborts/rolls back a
-failed new production rollout. Exact environment variables, secrets, and outage
+Deployments, builds an immutable Next.js package, validates additive migrations,
+deploys directly to Azure App Service, runs health and synthetic-order probes,
+records deployment evidence, and redeploys the previous package after a failed
+new release. Exact variables, OIDC bootstrap, Azure resources, and outage
 behavior are documented in [docs/factory-bootstrap.md](docs/factory-bootstrap.md).

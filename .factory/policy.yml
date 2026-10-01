@@ -14,10 +14,12 @@ authority:
     prohibited_paths:
       - ".factory/**"
       - ".github/**"
+      - "infra/**"
   governance:
     controlled_paths:
       - ".factory/**"
       - ".github/**"
+      - "infra/**"
     required_labels:
       - factory:managed
       - factory:governance
@@ -45,12 +47,6 @@ authority:
       repository_variable: FACTORY_ROOT_BOOTSTRAP_SHA
       exact_head_sha_required: true
       reusable: false
-    tokenless_migration_exception:
-      repository_variable: FACTORY_TOKENLESS_MIGRATION_SHA
-      exact_head_sha_required: true
-      reusable: false
-      purpose: replace-github-app-authentication-with-explicit-workflow-dispatch
-
 queue:
   work_in_progress_limit: 2
   max_attempts_per_issue: 3
@@ -82,6 +78,7 @@ risk:
       - "src/infrastructure/**"
       - ".github/**"
       - ".factory/**"
+      - "infra/**"
   prohibited:
     paths:
       - ".factory/policy.yml"
@@ -95,7 +92,7 @@ risk:
     changes:
       - "disable-required-checks"
       - "widen-production-credentials"
-      - "skip-stripe-signature-verification"
+      - "bypass-synthetic-probe-authentication"
       - "irreversible-database-migration"
 
 budgets:
@@ -104,8 +101,13 @@ budgets:
   max_release_minutes: 30
 
 release:
-  canary_percentages: [5, 25, 50, 100]
+  provider: azure-app-service
+  topology: direct-production
+  immutable_exact_sha_package_required: true
   error_rate_percent_max: 1
   p95_latency_ms_max: 1200
-  synthetic_checkout_required: true
+  synthetic_order_required: true
+  synthetic_order_cleanup_required: true
   rollback_on_failed_health_gate: true
+  database_rollback_allowed: false
+  monthly_budget_usd: 75
