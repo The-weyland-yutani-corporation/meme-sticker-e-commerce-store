@@ -8,6 +8,12 @@ credentials in implementation or review jobs.
 1. Enable Actions, Issues, Dependabot, and secret scanning.
 2. Install the `gh-aw` extension and compile each `.github/workflows/factory-*.md`.
 3. Commit each generated `.lock.yml`.
+   Use the repository-compatible `gh-aw` compiler version `v0.88.8` and compile
+   with `--action-mode action --action-tag
+   5e508589e03a7757a7e05b26e834292f5445bfb6`. Commit
+   `.github/aw/actions-lock.json` with the generated workflows. This preserves
+   the validated runtime while pinning `github/gh-aw-actions/setup` to the
+   immutable commit behind release `v0.88.8`.
 4. Create a `main` ruleset that:
    - requires pull requests;
    - requires `CI / Validate` and `CodeQL / Analyze`;
@@ -29,27 +35,31 @@ workflow token for explicit `workflow_dispatch`. The implementer has no direct
 issue-event activation or collaborator role check; GitHub's Actions permission
 and the dispatcher context form the activation boundary.
 
-Pull requests created with the workflow token do not emit recursive
-`pull_request` events. The conventional PR-dispatch controller therefore starts
-CI, CodeQL, correctness review, and security review explicitly against the PR
-head. Reviewer completion then wakes the deterministic attestation controller.
-The dispatcher records the exact implementer run ID on the selected issue; the
-PR controller uses that binding and the PR's closing-issue reference rather than
-guessing among concurrent work.
-For every resolved pull request, including implementer `workflow_run` events,
-the controller also requires a same-repository head and an
-owner/member/collaborator association (or the verified Dependabot identity)
-before it can dispatch AI reviews.
+Pull requests created with the workflow token cannot rely on recursive events:
+enterprise policy may mark their `pull_request` runs `action_required`, and
+token-created events may be suppressed. The conventional PR controller
+therefore reconciles open factory PRs every five minutes and explicitly starts
+CI, CodeQL, correctness review, and security review against the current head.
+Event triggers are latency optimizations only.
+
+The queue dispatcher records the exact implementer run ID on the selected
+issue. The PR controller verifies that run, downloads its SafeOutputs artifact,
+requires an exact `create_pull_request` item for the candidate PR, checks the
+gh-aw provenance footer and same-repository branch, and writes a trusted
+PR-to-issue marker. It does not rely on GitHub's closing-issue GraphQL field,
+which can be empty for workflow-token PRs even when their body contains
+`Closes #<issue>`.
 
 The one-time migration away from GitHub App authentication is authorized only
 when `FACTORY_TOKENLESS_MIGRATION_SHA` exactly matches the migration PR head.
 This exception is non-reusable and exists separately from the consumed initial
 bootstrap exception.
 
-Implementation pull requests are opened ready for review and link their issue
-with a closing keyword. The lifecycle controller releases failed/no-output runs
-for another bounded attempt, while the review repair bridge closes rejected PRs
-and returns their linked issues to `factory:repair`.
+Implementation pull requests are opened ready for review and include a closing
+keyword for readability. The scheduled lifecycle controller uses the trusted
+provenance marker to close merged source issues explicitly, releases
+failed/no-output runs for another bounded attempt, and returns closed or
+review-rejected work to `factory:repair`.
 
 Control-plane changes use a separate agent governance lane. They must carry the
 `factory:governance` label, update source and compiled lock files together,
