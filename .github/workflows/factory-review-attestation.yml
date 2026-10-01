@@ -276,9 +276,11 @@ jobs:
             if [ "$correctness_verified" = "true" ] &&
               [ "$security_verified" = "true" ] &&
               required_checks_passed "$pr_number"; then
-              gh pr merge "$pr_number" \
+              if ! gh pr merge "$pr_number" \
                 --repo "$REPOSITORY" \
                 --squash \
-                --match-head-commit "$head_sha"
+                --match-head-commit "$head_sha"; then
+                echo "::warning title=Factory merge deferred::Pull request #$pr_number could not be merged at head $head_sha and will be retried."
+              fi
             fi
           done
