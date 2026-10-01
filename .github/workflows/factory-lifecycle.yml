@@ -11,7 +11,7 @@ permissions:
   actions: read
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: factory-work-lifecycle
@@ -73,14 +73,52 @@ jobs:
           $marker" >/dev/null
           }
 
+          function failed_validation_run() {
+            local head_ref="$1"
+            local head_sha="$2"
+            local workflow runs failure
+            for workflow in ci.yml codeql.yml; do
+              runs="$(
+                gh run list \
+                  --repo "$REPOSITORY" \
+                  --workflow "$workflow" \
+                  --branch "$head_ref" \
+                  --limit 30 \
+                  --json event,headSha,status,conclusion,url
+              )"
+              failure="$(
+                jq -r --arg sha "$head_sha" '
+                  [
+                    .[] |
+                    select(.event == "workflow_dispatch") |
+                    select(.headSha == $sha)
+                  ][0] as $run |
+                  if (
+                    $run.status == "completed" and
+                    $run.conclusion == "failure"
+                  ) then
+                    $run.url
+                  else
+                    empty
+                  end
+                ' <<<"$runs"
+              )"
+              if [ -n "$failure" ]; then
+                printf '%s\n' "$failure"
+                return 0
+              fi
+            done
+            return 1
+          }
+
           gh pr list \
             --repo "$REPOSITORY" \
             --state all \
             --label "factory:managed" \
             --limit 100 \
-            --json number,state,mergedAt \
-            --jq '.[] | [.number, .state, (.mergedAt // "")] | @tsv' |
-          while IFS=$'\t' read -r pr_number state merged_at; do
+            --json number,state,mergedAt,headRefName,headRefOid \
+            --jq '.[] | [.number, .state, (.mergedAt // ""), .headRefName, .headRefOid] | @tsv' |
+          while IFS=$'\t' read -r pr_number state merged_at head_ref head_sha; do
             [ -n "$pr_number" ] || continue
             issue_number="$(provenance_issue "$pr_number")"
             [ -n "$issue_number" ] || continue
@@ -103,11 +141,28 @@ jobs:
                   --comment "Factory PR #$pr_number merged after current-head deterministic checks and independent reviews." >/dev/null
               fi
             elif [ "$state" = "OPEN" ]; then
-              gh issue edit "$issue_number" \
-                --repo "$REPOSITORY" \
-                --remove-label "factory:ready" \
-                --remove-label "factory:repair" \
-                --add-label "factory:active" >/dev/null
+              if failed_run="$(failed_validation_run "$head_ref" "$head_sha")"; then
+                gh issue edit "$issue_number" \
+                  --repo "$REPOSITORY" \
+                  --remove-label "factory:active" \
+                  --remove-label "factory:ready" \
+                  --add-label "factory:repair" >/dev/null
+                comment_once \
+                  "$issue_number" \
+                  "<!-- FACTORY_REPAIR_CHECKS: $pr_number $head_sha -->" \
+                  "Factory PR #$pr_number failed exact-head deterministic validation and returned to the bounded repair queue.
+
+          Failed run: $failed_run"
+                gh pr close "$pr_number" \
+                  --repo "$REPOSITORY" \
+                  --comment "Closed by lifecycle reconciliation after exact-head deterministic validation failed. Linked work has returned to the bounded repair queue." >/dev/null
+              else
+                gh issue edit "$issue_number" \
+                  --repo "$REPOSITORY" \
+                  --remove-label "factory:ready" \
+                  --remove-label "factory:repair" \
+                  --add-label "factory:active" >/dev/null
+              fi
             else
               gh issue edit "$issue_number" \
                 --repo "$REPOSITORY" \
