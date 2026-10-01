@@ -126,7 +126,7 @@ jobs:
                 -f body="Factory provenance verified for issue #$issue_number, implementer run $run_id, and current head \`$head_sha\`.
 
           $marker" >/dev/null; then
-                return 1
+                return 2
               fi
             fi
 
@@ -195,9 +195,15 @@ jobs:
               [[ "$head_ref" == factory/* ]] &&
                 [[ "$title" == "[factory] "* ]] ||
                 return 0
+              local provenance_status=0
               verify_implementer_provenance \
                 "$pr_number" "$pr_url" "$body" "$head_sha" >/dev/null ||
-                return 0
+                provenance_status=$?
+              case "$provenance_status" in
+                0) ;;
+                1) return 0 ;;
+                *) return 1 ;;
+              esac
             elif {
               [ "$author" = "dependabot" ] ||
               [ "$author" = "dependabot[bot]" ];
