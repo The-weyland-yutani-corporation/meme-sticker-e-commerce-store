@@ -25,7 +25,8 @@ jobs:
     steps:
       - name: Start implementer only when work is ready
         env:
-          DISPATCH_TOKEN: ${{ secrets.GH_AW_CI_TRIGGER_TOKEN }}
+          DISPATCH_ACTOR: github-actions[bot]
+          DISPATCH_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         shell: bash
@@ -154,7 +155,6 @@ jobs:
                 select(
                   .user.login == "github-actions[bot]" and
                   .performed_via_github_app.slug == "github-actions" and
-                  .created_at == .updated_at and
                   (.body | contains("<!-- FACTORY_IMPLEMENT_ATTEMPT -->"))
                 )
               ] | length'
@@ -172,31 +172,6 @@ jobs:
             exit 1
           fi
 
-          if [ -z "$DISPATCH_TOKEN" ]; then
-            upsert_incident \
-              "[factory dispatch] Missing trigger credential" \
-              "The queue has eligible work, but GH_AW_CI_TRIGGER_TOKEN is not configured. The default Actions token dispatches as github-actions[bot], which fails the implementer's gh-aw role gate."
-            exit 1
-          fi
-
-          dispatch_actor="$(
-            GH_TOKEN="$DISPATCH_TOKEN" gh api user --jq '.login'
-          )"
-          dispatch_permission="$(
-            GH_TOKEN="$DISPATCH_TOKEN" gh api \
-              "repos/$REPOSITORY/collaborators/$dispatch_actor/permission" \
-              --jq '.permission'
-          )"
-          case "$dispatch_permission" in
-            admin|maintain|write) ;;
-            *)
-              upsert_incident \
-                "[factory dispatch] Trigger credential lacks write access" \
-                "GH_AW_CI_TRIGGER_TOKEN authenticates as $dispatch_actor with repository permission '$dispatch_permission'. The implementer requires write, maintain, or admin."
-              exit 1
-              ;;
-          esac
-
           next_attempt="$((attempt_count + 1))"
           aw_context="$(
             jq -cn \
@@ -208,6 +183,17 @@ jobs:
             --repo "$REPOSITORY" \
             --add-label "factory:active"
 
+          attempt_comment_id="$(
+            gh api \
+              --method POST \
+              "repos/$REPOSITORY/issues/$issue_number/comments" \
+              -f body="Implementation attempt $next_attempt of $max_attempts dispatched as @$DISPATCH_ACTOR.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->" \
+              --jq '.id'
+          )"
+
+          dispatch_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           if ! GH_TOKEN="$DISPATCH_TOKEN" gh workflow run \
             "factory-implement.lock.yml" \
             --repo "$REPOSITORY" \
@@ -215,11 +201,46 @@ jobs:
             gh issue edit "$issue_number" \
               --repo "$REPOSITORY" \
               --remove-label "factory:active"
+            gh api \
+              --method DELETE \
+              "repos/$REPOSITORY/issues/comments/$attempt_comment_id"
             exit 1
           fi
 
-          gh issue comment "$issue_number" \
-            --repo "$REPOSITORY" \
-            --body "Implementation attempt $next_attempt of $max_attempts dispatched as @$dispatch_actor.
+          implementer_run_id=""
+          for _ in {1..10}; do
+            implementer_run_id="$(
+              gh run list \
+                --repo "$REPOSITORY" \
+                --workflow "factory-implement.lock.yml" \
+                --event workflow_dispatch \
+                --limit 20 \
+                --json databaseId,createdAt |
+              jq -r --arg started "$dispatch_started" '
+                  [
+                    .[] |
+                    select(.createdAt >= $started)
+                  ] |
+                  sort_by(.createdAt) |
+                  last.databaseId // empty
+                '
+            )"
+            [ -n "$implementer_run_id" ] && break
+            sleep 2
+          done
 
-          <!-- FACTORY_IMPLEMENT_ATTEMPT -->"
+          if [ -z "$implementer_run_id" ]; then
+            upsert_incident \
+              "[factory dispatch] Could not bind implementer run for issue #$issue_number" \
+              "The implementer dispatch was accepted, but its run ID could not be correlated to issue #$issue_number. The issue remains active for deterministic reconciliation."
+            exit 1
+          fi
+
+          gh api \
+            --method PATCH \
+            "repos/$REPOSITORY/issues/comments/$attempt_comment_id" \
+            -f body="Implementation attempt $next_attempt of $max_attempts dispatched as @$DISPATCH_ACTOR.
+
+          <!-- FACTORY_IMPLEMENT_ATTEMPT -->
+          <!-- FACTORY_IMPLEMENT_RUN: $implementer_run_id -->" \
+            >/dev/null

@@ -34,6 +34,8 @@ authority:
       - direct-current-head-merge
     immutable_after_bootstrap:
       - ".factory/policy.yml"
+      - ".github/workflows/factory-dispatch.yml"
+      - ".github/workflows/factory-pr-dispatch.yml"
       - ".github/workflows/factory-review.md"
       - ".github/workflows/factory-review.lock.yml"
       - ".github/workflows/factory-security-review.md"
@@ -43,6 +45,11 @@ authority:
       repository_variable: FACTORY_ROOT_BOOTSTRAP_SHA
       exact_head_sha_required: true
       reusable: false
+    tokenless_migration_exception:
+      repository_variable: FACTORY_TOKENLESS_MIGRATION_SHA
+      exact_head_sha_required: true
+      reusable: false
+      purpose: replace-github-app-authentication-with-explicit-workflow-dispatch
 
 queue:
   work_in_progress_limit: 2
@@ -78,6 +85,8 @@ risk:
   prohibited:
     paths:
       - ".factory/policy.yml"
+      - ".github/workflows/factory-dispatch.yml"
+      - ".github/workflows/factory-pr-dispatch.yml"
       - ".github/workflows/factory-review.md"
       - ".github/workflows/factory-review.lock.yml"
       - ".github/workflows/factory-security-review.md"

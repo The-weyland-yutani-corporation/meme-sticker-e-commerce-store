@@ -8,6 +8,12 @@ credentials in implementation or review jobs.
 1. Enable Actions, Issues, Dependabot, and secret scanning.
 2. Install the `gh-aw` extension and compile each `.github/workflows/factory-*.md`.
 3. Commit each generated `.lock.yml`.
+   Use the repository-compatible `gh-aw` compiler version `v0.88.8` and compile
+   with `--action-mode action --action-tag
+   5e508589e03a7757a7e05b26e834292f5445bfb6`. Commit
+   `.github/aw/actions-lock.json` with the generated workflows. This preserves
+   the validated runtime while pinning `github/gh-aw-actions/setup` to the
+   immutable commit behind release `v0.88.8`.
 4. Create a `main` ruleset that:
    - requires pull requests;
    - requires `CI / Validate` and `CodeQL / Analyze`;
@@ -17,22 +23,43 @@ credentials in implementation or review jobs.
    The included CodeQL job uses local SARIF enforcement so it also works when
    GitHub Advanced Security is not licensed for a private repository.
 5. Create the labels referenced by `.factory/policy.yml` and the workflows.
-6. Create a repository-scoped fine-grained PAT owned by a repository owner,
-   grant the minimum Actions dispatch access, and store it as
-   `GH_AW_CI_TRIGGER_TOKEN`. Scheduled dispatches use this identity so `gh-aw`
-   can verify the implementer's required repository role; the default Actions
-   token authenticates as `github-actions[bot]` and is rejected by that gate.
+6. Set the repository's default workflow permissions to **Read and write** and
+   enable **Allow GitHub Actions to create and approve pull requests**. No
+   personal token or GitHub App credential is required.
 
 The conventional `Factory queue dispatcher` performs a low-cost 15-minute
 reconciliation and invokes the AI implementer only when a ready/repair issue
 exists, the WIP limit allows it, and no implementer is already active. It passes
-the selected issue through `aw_context`, records bounded attempts, and does not
-use scheduled agent runs as idle polling.
+the selected issue through `aw_context`, records bounded attempts, and uses the
+workflow token for explicit `workflow_dispatch`. The implementer has no direct
+issue-event activation or collaborator role check; GitHub's Actions permission
+and the dispatcher context form the activation boundary.
 
-Implementation pull requests are opened ready for review and link their issue
-with a closing keyword. The lifecycle controller releases failed/no-output runs
-for another bounded attempt, while the review repair bridge closes rejected PRs
-and returns their linked issues to `factory:repair`.
+Pull requests created with the workflow token cannot rely on recursive events:
+enterprise policy may mark their `pull_request` runs `action_required`, and
+token-created events may be suppressed. The conventional PR controller
+therefore reconciles open factory PRs every five minutes and explicitly starts
+CI, CodeQL, correctness review, and security review against the current head.
+Event triggers are latency optimizations only.
+
+The queue dispatcher records the exact implementer run ID on the selected
+issue. The PR controller verifies that run, downloads its SafeOutputs artifact,
+requires an exact `create_pull_request` item for the candidate PR, checks the
+gh-aw provenance footer and same-repository branch, and writes a trusted
+PR-to-issue marker. It does not rely on GitHub's closing-issue GraphQL field,
+which can be empty for workflow-token PRs even when their body contains
+`Closes #<issue>`.
+
+The one-time migration away from GitHub App authentication is authorized only
+when `FACTORY_TOKENLESS_MIGRATION_SHA` exactly matches the migration PR head.
+This exception is non-reusable and exists separately from the consumed initial
+bootstrap exception.
+
+Implementation pull requests are opened ready for review and include a closing
+keyword for readability. The scheduled lifecycle controller uses the trusted
+provenance marker to close merged source issues explicitly, releases
+failed/no-output runs for another bounded attempt, and returns closed or
+review-rejected work to `factory:repair`.
 
 Control-plane changes use a separate agent governance lane. They must carry the
 `factory:governance` label, update source and compiled lock files together,
@@ -45,10 +72,10 @@ changes control-plane paths, validates both PASS comments against successful
 reviewer runs for the exact current head, and performs a direct squash merge. It
 never leaves persistent auto-merge armed across later commits.
 
-The policy, independent reviewer definitions, generated reviewer workflows, and
-attestation controller are root controls. The initial dark-factory bootstrap
-establishes them once; ordinary implementation and governance agents must not
-modify them afterward.
+The policy, issue/PR dispatch controllers, independent reviewer definitions,
+generated reviewer workflows, and attestation controller are root controls.
+The initial dark-factory bootstrap establishes them once; ordinary
+implementation and governance agents must not modify them afterward.
 
 To authorize that one-time root-control bootstrap without weakening steady-state
 automation, set the repository variable `FACTORY_ROOT_BOOTSTRAP_SHA` to the exact

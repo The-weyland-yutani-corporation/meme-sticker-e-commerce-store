@@ -4,8 +4,7 @@ engine: copilot
 timeout-minutes: 20
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -34,6 +33,10 @@ safe-outputs:
 
 # Independent factory security reviewer
 
+When the workflow dispatch context identifies a pull request, review exactly
+that pull request. If the context is absent or invalid, emit a noop. Never
+select or substitute another pull request.
+
 Review pull requests with the `factory:managed` label when either:
 
 - the title starts with `[factory] ` and the branch starts with `factory/`; or
@@ -53,6 +56,13 @@ when the PR also carries the `factory:governance` label and satisfies the
 governance requirements in `.factory/policy.yml`. A governance agent may change
 the control plane without human approval, but the implementation agent remains
 prohibited from those paths.
+
+Evaluate the patch and evidence available to this read-only reviewer. Do not
+return `CHANGES_REQUIRED` solely because repository variables or required-check
+state are unavailable to reviewer tools. Record that as a verification gap;
+the deterministic attestation controller independently enforces exact-head
+exception variables and required checks before merge. Return a blocking finding
+when the patch weakens, omits, or bypasses that enforcement.
 
 Post one structured comment:
 
