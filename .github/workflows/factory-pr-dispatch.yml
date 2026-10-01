@@ -120,9 +120,10 @@ jobs:
                   (.body | contains($marker))
                 )
               ' | grep -Fqx "true"; then
-              gh issue comment "$pr_number" \
-                --repo "$REPOSITORY" \
-                --body "Factory provenance verified for issue #$issue_number, implementer run $run_id, and current head \`$head_sha\`.
+              gh api \
+                --method POST \
+                "repos/$REPOSITORY/issues/$pr_number/comments" \
+                -f body="Factory provenance verified for issue #$issue_number, implementer run $run_id, and current head \`$head_sha\`.
 
           $marker" >/dev/null
             fi
@@ -257,5 +258,7 @@ jobs:
             --jq '.[].number' |
           while read -r pr_number; do
             [ -n "$pr_number" ] || continue
-            reconcile_pr "$pr_number"
+            if ! reconcile_pr "$pr_number"; then
+              echo "::warning title=PR reconciliation deferred::Pull request #$pr_number could not be fully dispatched and will be retried."
+            fi
           done
