@@ -11,7 +11,7 @@ permissions:
   actions: write
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: factory-pr-dispatch
@@ -120,12 +120,14 @@ jobs:
                   (.body | contains($marker))
                 )
               ' | grep -Fqx "true"; then
-              gh api \
+              if ! gh api \
                 --method POST \
                 "repos/$REPOSITORY/issues/$pr_number/comments" \
                 -f body="Factory provenance verified for issue #$issue_number, implementer run $run_id, and current head \`$head_sha\`.
 
-          $marker" >/dev/null
+          $marker" >/dev/null; then
+                return 1
+              fi
             fi
 
             printf '%s\n' "$issue_number"
@@ -230,18 +232,24 @@ jobs:
                 }'
             )"
 
-            dispatch_once "ci.yml" "$head_ref" "$head_sha"
-            dispatch_once "codeql.yml" "$head_ref" "$head_sha"
+            local dispatch_failed=0
+            dispatch_once "ci.yml" "$head_ref" "$head_sha" ||
+              dispatch_failed=1
+            dispatch_once "codeql.yml" "$head_ref" "$head_sha" ||
+              dispatch_failed=1
             dispatch_once \
               "factory-review.lock.yml" \
               "$head_ref" \
               "$head_sha" \
-              -f "aw_context=$context"
+              -f "aw_context=$context" ||
+              dispatch_failed=1
             dispatch_once \
               "factory-security-review.lock.yml" \
               "$head_ref" \
               "$head_sha" \
-              -f "aw_context=$context"
+              -f "aw_context=$context" ||
+              dispatch_failed=1
+            [ "$dispatch_failed" -eq 0 ]
           }
 
           if [ "${{ github.event_name }}" = "pull_request" ]; then
