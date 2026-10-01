@@ -102,7 +102,7 @@ describe("Storefront checkout error handling", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        new Response(JSON.stringify({ error: "Payment provider unavailable" }), {
+        new Response(JSON.stringify({ error: "Order service unavailable" }), {
           status: 500,
         }),
       ),
@@ -115,13 +115,13 @@ describe("Storefront checkout error handling", () => {
     clickAddForProduct("This Is Fine");
 
     const cartPanel = screen.getByRole("complementary", { name: "Shopping cart" });
-    fireEvent.click(within(cartPanel).getByRole("button", { name: /secure checkout/i }));
+    fireEvent.click(within(cartPanel).getByRole("button", { name: /create test order/i }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Payment provider unavailable");
+    expect(alert).toHaveTextContent("Order service unavailable");
   });
 
-  it("shows an alert when checkout fetch resolves OK but is missing a url", async () => {
+  it("shows an alert when checkout fetch resolves OK but is missing a confirmation URL", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })),
@@ -132,7 +132,7 @@ describe("Storefront checkout error handling", () => {
     clickAddForProduct("This Is Fine");
 
     const cartPanel = screen.getByRole("complementary", { name: "Shopping cart" });
-    fireEvent.click(within(cartPanel).getByRole("button", { name: /secure checkout/i }));
+    fireEvent.click(within(cartPanel).getByRole("button", { name: /create test order/i }));
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(

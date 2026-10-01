@@ -2,16 +2,24 @@
 
 set -euo pipefail
 
-environment_name="${1:?usage: validate-config.sh <staging|production>}"
+environment_name="${1:?usage: validate-config.sh <production>}"
 
 required_variables=(
   APP_URL
+  AZURE_APP_NAME
+  AZURE_CLIENT_ID
+  AZURE_KEY_VAULT_NAME
+  AZURE_LOCATION
+  AZURE_NAME_PREFIX
+  AZURE_POSTGRES_NAME
+  AZURE_PRINCIPAL_OBJECT_ID
+  AZURE_RELEASE_CONTAINER
+  AZURE_RESOURCE_GROUP
+  AZURE_STORAGE_ACCOUNT
+  AZURE_SUBSCRIPTION_ID
+  AZURE_TENANT_ID
   DATABASE_URL
-  STRIPE_SECRET_KEY
-  STRIPE_WEBHOOK_SECRET
-  VERCEL_ORG_ID
-  VERCEL_PROJECT_ID
-  VERCEL_TOKEN
+  SYNTHETIC_PROBE_TOKEN
 )
 
 missing=()
@@ -37,30 +45,8 @@ if [[ "$DATABASE_URL" != postgres://* && "$DATABASE_URL" != postgresql://* ]]; t
   exit 1
 fi
 
-if [[ "$VERCEL_PROJECT_ID" != prj_* ]]; then
-  echo "VERCEL_PROJECT_ID must be a Vercel project ID." >&2
-  exit 1
-fi
-
-if [[ "$VERCEL_ORG_ID" != team_* && "$VERCEL_ORG_ID" != user_* ]]; then
-  echo "VERCEL_ORG_ID must be a Vercel team or user ID." >&2
-  exit 1
-fi
-
-if [[ "$STRIPE_WEBHOOK_SECRET" != whsec_* ]]; then
-  echo "STRIPE_WEBHOOK_SECRET must be a Stripe webhook signing secret." >&2
-  exit 1
-fi
-
-if [[ "$environment_name" == "staging" && "$STRIPE_SECRET_KEY" != sk_test_* ]]; then
-  echo "Staging must use a Stripe test-mode secret key." >&2
-  exit 1
-fi
-
-if [[ "$environment_name" == "production" &&
-  "$STRIPE_SECRET_KEY" != sk_test_* &&
-  "$STRIPE_SECRET_KEY" != sk_live_* ]]; then
-  echo "Production STRIPE_SECRET_KEY must be a Stripe secret key." >&2
+if [[ "$environment_name" != "production" ]]; then
+  echo "Only the production Azure environment is supported." >&2
   exit 1
 fi
 

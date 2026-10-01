@@ -17,12 +17,20 @@ enum OrderStatus {
   REFUNDED
 }
 
+enum CheckoutMode {
+  PAYMENT_FREE
+  STRIPE
+}
+
 model Order {
   id                      String       @id @default(cuid())
+  confirmationToken       String       @unique @default(uuid())
   email                   String?
   currency                String       @default("usd")
   amountTotal             Int
-  status                  OrderStatus  @default(PENDING)
+  status                  OrderStatus  @default(FULFILLMENT_PENDING)
+  checkoutMode            CheckoutMode @default(PAYMENT_FREE)
+  synthetic               Boolean      @default(false)
   stripeCheckoutSessionId String?      @unique
   stripePaymentIntentId   String?      @unique
   items                   OrderItem[]

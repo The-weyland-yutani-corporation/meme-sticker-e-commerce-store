@@ -92,8 +92,9 @@ ${summary}
 
 ## Required response
 
-The controller failed closed. Review the workflow evidence before retrying. No
-Stripe charge or other transactional synthetic operation was attempted.
+The controller failed closed. Review the workflow and Azure evidence before
+retrying. Synthetic orders contain no customer data and are deleted after
+verification.
 
 ${marker}
 <!-- factory-signal-category:production -->

@@ -1,4 +1,4 @@
-name: Autonomous release controller
+name: Autonomous Azure release controller
 
 on:
   workflow_dispatch:
@@ -8,10 +8,11 @@ on:
 permissions:
   contents: read
   deployments: write
+  id-token: write
   issues: write
 
 concurrency:
-  group: autonomous-release-controller
+  group: autonomous-azure-release-controller
   cancel-in-progress: false
 
 env:
@@ -21,18 +22,15 @@ env:
 
 jobs:
   plan:
-    name: Reconcile main and deployments
+    name: Reconcile main and production
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      previous_production_sha: ${{ steps.reconcile.outputs.previous_production_sha }}
-      previous_production_url: ${{ steps.reconcile.outputs.previous_production_url }}
+      previous_blob: ${{ steps.reconcile.outputs.previous_blob }}
+      previous_sha: ${{ steps.reconcile.outputs.previous_sha }}
       release_required: ${{ steps.reconcile.outputs.release_required }}
       target_sha: ${{ steps.reconcile.outputs.target_sha }}
     steps:
-      - name: Check out controller
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Reconcile latest main SHA
         id: reconcile
         shell: bash
@@ -42,271 +40,65 @@ jobs:
           set -euo pipefail
 
           default_branch="${DEFAULT_BRANCH:-main}"
-          target_sha="$(
-            gh api "repos/${REPOSITORY}/commits/${default_branch}" --jq '.sha'
+          target_sha="$(gh api "repos/${REPOSITORY}/commits/${default_branch}" --jq '.sha')"
+          deployments="$(
+            gh api --paginate --slurp \
+              "repos/${REPOSITORY}/deployments?environment=production&per_page=100" |
+              jq 'add'
           )"
-          previous_sha=""
-          previous_url=""
-          target_is_live="false"
+          previous='null'
+          target_is_live=false
 
-          while IFS=$'\t' read -r deployment_id deployment_sha; do
-            [ -n "$deployment_id" ] || continue
+          while IFS= read -r deployment; do
+            deployment_id="$(jq -r '.id' <<<"$deployment")"
             status="$(
               gh api \
                 "repos/${REPOSITORY}/deployments/${deployment_id}/statuses?per_page=1"
             )"
-            state="$(jq -r '.[0].state // empty' <<<"$status")"
-            [ "$state" = "success" ] || continue
-
-            environment_url="$(
-              jq -r '.[0].environment_url // .[0].target_url // empty' \
-                <<<"$status"
-            )"
+            [ "$(jq -r '.[0].state // empty' <<<"$status")" = "success" ] || continue
+            deployment_sha="$(jq -r '.sha' <<<"$deployment")"
             if [ "$deployment_sha" = "$target_sha" ]; then
-              target_is_live="true"
+              target_is_live=true
               continue
             fi
-            if [ -z "$previous_sha" ]; then
-              previous_sha="$deployment_sha"
-              previous_url="$environment_url"
+            if [ "$previous" = "null" ]; then
+              previous="$deployment"
             fi
-          done < <(
-            gh api --paginate \
-              "repos/${REPOSITORY}/deployments?environment=production&per_page=100" \
-              --jq '.[] | [.id, .sha] | @tsv'
-          )
+          done < <(jq -c '.[]' <<<"$deployments")
 
           {
             echo "target_sha=$target_sha"
-            echo "previous_production_sha=$previous_sha"
-            echo "previous_production_url=$previous_url"
-            if [ "$target_is_live" = "true" ]; then
-              echo "release_required=false"
-            else
-              echo "release_required=true"
-            fi
+            echo "release_required=$([ "$target_is_live" = true ] && echo false || echo true)"
+            echo "previous_sha=$(jq -r '.sha // empty' <<<"$previous")"
+            echo "previous_blob=$(jq -r '.payload.package_blob // empty' <<<"$previous")"
           } >>"$GITHUB_OUTPUT"
 
-      - name: Report reconciliation failure
-        if: failure()
-        shell: bash
-        env:
-          RELEASE_PHASE: reconcile
-          TARGET_SHA: ${{ steps.reconcile.outputs.target_sha }}
-        run: scripts/release/incident.sh report "Unable to reconcile main against GitHub Deployments."
-
-  staging:
-    name: Migrate and deploy staging
+  release:
+    name: Deploy production
     needs: plan
     if: needs.plan.outputs.release_required == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: staging
-    outputs:
-      deployment_id: ${{ steps.github_deployment.outputs.deployment_id }}
-      deployment_url: ${{ steps.deploy.outputs.deployment_url }}
-    env:
-      APP_URL: ${{ vars.APP_URL }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-      TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-    steps:
-      - name: Check out target SHA
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.plan.outputs.target_sha }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Validate staging bootstrap
-        run: scripts/release/validate-config.sh staging
-
-      - name: Pull and validate Vercel staging configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx --yes vercel@59.26.0 pull \
-            --yes \
-            --environment=staging \
-            --token="$VERCEL_TOKEN"
-          scripts/release/validate-vercel-env.sh staging
-
-      - name: Create staging deployment record
-        id: github_deployment
-        shell: bash
-        run: |
-          set -euo pipefail
-          deployment_id="$(
-            gh api --method POST "repos/${REPOSITORY}/deployments" \
-              -f ref="$TARGET_SHA" \
-              -f environment="staging" \
-              -f description="Autonomous staging release" \
-              -f payload="{\"run_url\":\"${RUN_URL}\"}" \
-              -F auto_merge=false \
-              -F transient_environment=true \
-              -F production_environment=false \
-              --jq '.id'
-          )"
-          echo "deployment_id=$deployment_id" >>"$GITHUB_OUTPUT"
-          gh api --method POST \
-            "repos/${REPOSITORY}/deployments/${deployment_id}/statuses" \
-            -f state="in_progress" \
-            -f log_url="$RUN_URL" \
-            -f description="Migration and staging deployment started" >/dev/null
-
-      - name: Enforce additive migrations
-        run: |
-          scripts/release/check-migrations.sh \
-            "${{ needs.plan.outputs.previous_production_sha }}" \
-            "$TARGET_SHA"
-
-      - name: Apply staging migrations
-        run: npm run db:migrate
-
-      - name: Deploy staging
-        id: deploy
-        shell: bash
-        run: |
-          set -euo pipefail
-          deployment_url="$(
-            npx --yes vercel@59.26.0 deploy \
-              --yes \
-              --target=staging \
-              --meta="releaseSha=${TARGET_SHA}" \
-              --token="$VERCEL_TOKEN" |
-              tail -n 1
-          )"
-          if [[ "$deployment_url" != https://* ]]; then
-            echo "Vercel did not return a staging deployment URL." >&2
-            exit 1
-          fi
-          echo "deployment_url=$deployment_url" >>"$GITHUB_OUTPUT"
-          vercel_deployment_id="$(
-            npx --yes vercel@59.26.0 inspect "$deployment_url" \
-              --wait \
-              --timeout=5m \
-              --json \
-              --token="$VERCEL_TOKEN" |
-              jq -er '.id'
-          )"
-          echo "vercel_deployment_id=$vercel_deployment_id" >>"$GITHUB_OUTPUT"
-
-      - name: Run safe staging probes
-        shell: bash
-        env:
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
-        run: |
-          set -euo pipefail
-          scripts/release/probe-release.sh "$DEPLOYMENT_URL"
-          if [ "${APP_URL%/}" != "${DEPLOYMENT_URL%/}" ]; then
-            scripts/release/probe-release.sh "$APP_URL"
-          fi
-
-      - name: Record staging deployment result
-        if: always() && steps.github_deployment.outputs.deployment_id != ''
-        shell: bash
-        env:
-          DEPLOYMENT_ID: ${{ steps.github_deployment.outputs.deployment_id }}
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          state="failure"
-          description="Staging release failed"
-          if [ "$JOB_STATUS" = "success" ]; then
-            state="success"
-            description="Staging migration and probes passed"
-          fi
-          arguments=(
-            --method POST
-            "repos/${REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses"
-            -f "state=${state}"
-            -f "log_url=${RUN_URL}"
-            -f "description=${description}"
-          )
-          if [ -n "$DEPLOYMENT_URL" ]; then
-            arguments+=(-f "environment_url=${DEPLOYMENT_URL}")
-          fi
-          gh api "${arguments[@]}" >/dev/null
-
-      - name: Write staging evidence
-        if: always()
-        shell: bash
-        env:
-          DEPLOYMENT_ID: ${{ steps.github_deployment.outputs.deployment_id }}
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
-          JOB_STATUS: ${{ job.status }}
-          PREVIOUS_SHA: ${{ needs.plan.outputs.previous_production_sha }}
-          VERCEL_DEPLOYMENT_ID: ${{ steps.deploy.outputs.vercel_deployment_id }}
-        run: |
-          jq -n \
-            --arg deployment_id "$DEPLOYMENT_ID" \
-            --arg deployment_url "$DEPLOYMENT_URL" \
-            --arg vercel_deployment_id "$VERCEL_DEPLOYMENT_ID" \
-            --arg environment "staging" \
-            --arg outcome "$JOB_STATUS" \
-            --arg previous_sha "$PREVIOUS_SHA" \
-            --arg run_url "$RUN_URL" \
-            --arg target_sha "$TARGET_SHA" \
-            --arg timestamp "$(date -u +%FT%TZ)" \
-            '{
-              deployment_id: $deployment_id,
-              deployment_url: $deployment_url,
-              vercel_deployment_id: $vercel_deployment_id,
-              environment: $environment,
-              outcome: $outcome,
-              previous_production_sha: $previous_sha,
-              run_url: $run_url,
-              target_sha: $target_sha,
-              timestamp: $timestamp
-            }' > staging-release-evidence.json
-
-      - name: Upload staging evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: staging-release-evidence-${{ needs.plan.outputs.target_sha }}
-          path: staging-release-evidence.json
-          retention-days: 30
-
-      - name: Report staging failure
-        if: failure()
-        env:
-          RELEASE_PHASE: staging
-        run: scripts/release/incident.sh report "Staging configuration, migration, deployment, or safe probes failed."
-
-  production:
-    name: Promote to production
-    needs: [plan, staging]
-    if: needs.plan.outputs.release_required == 'true' && needs.staging.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: production
     env:
       APP_URL: ${{ vars.APP_URL }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_NAME_PREFIX: ${{ vars.AZURE_NAME_PREFIX }}
+      AZURE_POSTGRES_NAME: ${{ vars.AZURE_POSTGRES_NAME }}
+      AZURE_PRINCIPAL_OBJECT_ID: ${{ vars.AZURE_PRINCIPAL_OBJECT_ID }}
+      AZURE_RELEASE_CONTAINER: ${{ vars.AZURE_RELEASE_CONTAINER }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      EXPECTED_RELEASE_SHA: ${{ needs.plan.outputs.target_sha }}
+      RELEASE_SHA: ${{ needs.plan.outputs.target_sha }}
       TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
-      - name: Check out target SHA
+      - name: Check out exact target
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -315,190 +107,316 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate production bootstrap
+      - name: Read production secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url="$(
+            az keyvault secret show \
+              --vault-name "$AZURE_KEY_VAULT_NAME" \
+              --name database-url \
+              --query value \
+              --output tsv
+          )"
+          postgres_password="$(
+            az keyvault secret show \
+              --vault-name "$AZURE_KEY_VAULT_NAME" \
+              --name postgres-admin-password \
+              --query value \
+              --output tsv
+          )"
+          probe_token="$(
+            az keyvault secret show \
+              --vault-name "$AZURE_KEY_VAULT_NAME" \
+              --name synthetic-probe-token \
+              --query value \
+              --output tsv
+          )"
+          echo "::add-mask::$database_url"
+          echo "::add-mask::$postgres_password"
+          echo "::add-mask::$probe_token"
+          {
+            echo "DATABASE_URL=$database_url"
+            echo "POSTGRES_ADMIN_PASSWORD=$postgres_password"
+            echo "SYNTHETIC_PROBE_TOKEN=$probe_token"
+          } >>"$GITHUB_ENV"
+
+      - name: Validate production configuration
         run: scripts/release/validate-config.sh production
 
-      - name: Pull and validate Vercel production configuration
+      - name: Validate and preview infrastructure
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes vercel@59.26.0 pull \
-            --yes \
-            --environment=production \
-            --token="$VERCEL_TOKEN"
-          scripts/release/validate-vercel-env.sh production
+          infrastructure_release_sha="${{ needs.plan.outputs.previous_sha }}"
+          if [ -z "$infrastructure_release_sha" ]; then
+            infrastructure_release_sha=bootstrap
+          fi
+          scripts/azure/validate-bicep.sh
+          az deployment group what-if \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam \
+            --parameters \
+              deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
+              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+              syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
+              releaseSha="$infrastructure_release_sha" \
+            --no-pretty-print >/dev/null
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam \
+            --parameters \
+              deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
+              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+              syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
+              releaseSha="$infrastructure_release_sha" \
+            --output none
+          scripts/azure/configure-postgres-firewall.sh
 
-      - name: Create production deployment record
-        id: github_deployment
+      - name: Build immutable application package
+        id: package
         shell: bash
         run: |
           set -euo pipefail
+          archive="$(scripts/release/package-app.sh | tail -n 1)"
+          blob_name="${TARGET_SHA}.zip"
+          package_exists="$(
+            az storage blob exists \
+              --account-name "$AZURE_STORAGE_ACCOUNT" \
+              --auth-mode login \
+              --container-name "$AZURE_RELEASE_CONTAINER" \
+              --name "$blob_name" \
+              --query exists \
+              --output tsv
+          )"
+          if [ "$package_exists" != true ]; then
+            az storage blob upload \
+              --account-name "$AZURE_STORAGE_ACCOUNT" \
+              --auth-mode login \
+              --container-name "$AZURE_RELEASE_CONTAINER" \
+              --name "$blob_name" \
+              --file "$archive" \
+              --overwrite false \
+              --only-show-errors
+          fi
+          echo "archive=$archive" >>"$GITHUB_OUTPUT"
+          echo "blob_name=$blob_name" >>"$GITHUB_OUTPUT"
+
+      - name: Create GitHub production deployment
+        id: deployment
+        shell: bash
+        env:
+          PACKAGE_BLOB: ${{ steps.package.outputs.blob_name }}
+          PREVIOUS_BLOB: ${{ needs.plan.outputs.previous_blob }}
+          PREVIOUS_SHA: ${{ needs.plan.outputs.previous_sha }}
+        run: |
+          set -euo pipefail
+          request="$(
+            jq -cn \
+              --arg ref "$TARGET_SHA" \
+              --arg package_blob "$PACKAGE_BLOB" \
+              --arg previous_blob "$PREVIOUS_BLOB" \
+              --arg previous_sha "$PREVIOUS_SHA" \
+              --arg run_url "$RUN_URL" \
+              '{
+                ref:$ref,
+                environment:"production",
+                description:"Autonomous Azure production release",
+                payload:{
+                  package_blob:$package_blob,
+                  previous_blob:$previous_blob,
+                  previous_sha:$previous_sha,
+                  run_url:$run_url
+                },
+                auto_merge:false,
+                transient_environment:false,
+                production_environment:true,
+                required_contexts:[]
+              }'
+          )"
           deployment_id="$(
             gh api --method POST "repos/${REPOSITORY}/deployments" \
-              -f ref="$TARGET_SHA" \
-              -f environment="production" \
-              -f description="Autonomous production release" \
-              -f payload="{\"run_url\":\"${RUN_URL}\"}" \
-              -F auto_merge=false \
-              -F transient_environment=false \
-              -F production_environment=true \
+              --input - \
+              <<<"$request" \
               --jq '.id'
           )"
           echo "deployment_id=$deployment_id" >>"$GITHUB_OUTPUT"
           gh api --method POST \
             "repos/${REPOSITORY}/deployments/${deployment_id}/statuses" \
-            -f state="in_progress" \
+            -f state=in_progress \
             -f log_url="$RUN_URL" \
-            -f description="Production promotion started" >/dev/null
+            -f environment_url="$APP_URL" \
+            -f description="Azure migration and deployment started" >/dev/null
 
-      - name: Recheck migration safety
+      - name: Open temporary migration firewall rule
+        id: firewall
+        shell: bash
         run: |
-          scripts/release/check-migrations.sh \
-            "${{ needs.plan.outputs.previous_production_sha }}" \
-            "$TARGET_SHA"
+          set -euo pipefail
+          runner_ip="$(curl --fail --silent --show-error https://api.ipify.org)"
+          rule_name="github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_POSTGRES_NAME" \
+            --rule-name "$rule_name" \
+            --start-ip-address "$runner_ip" \
+            --end-ip-address "$runner_ip" \
+            --output none
+          echo "rule_name=$rule_name" >>"$GITHUB_OUTPUT"
+
+      - name: Enforce additive migrations
+        run: scripts/release/check-migrations.sh "${{ needs.plan.outputs.previous_sha }}" "$TARGET_SHA"
 
       - name: Apply production migrations
         run: npm run db:migrate
 
-      - name: Promote exact SHA to production
+      - name: Close temporary migration firewall rule
+        if: always() && steps.firewall.outputs.rule_name != ''
+        shell: bash
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_POSTGRES_NAME" \
+            --rule-name "${{ steps.firewall.outputs.rule_name }}" \
+            --yes \
+            --output none
+
+      - name: Deploy exact package to App Service
         id: deploy
         shell: bash
         run: |
           set -euo pipefail
-          deployment_url="$(
-            npx --yes vercel@59.26.0 deploy \
-              --yes \
-              --prod \
-              --meta="releaseSha=${TARGET_SHA}" \
-              --token="$VERCEL_TOKEN" |
-              tail -n 1
-          )"
-          if [[ "$deployment_url" != https://* ]]; then
-            echo "Vercel did not return a production deployment URL." >&2
+          echo "attempted=true" >>"$GITHUB_OUTPUT"
+          az webapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_APP_NAME" \
+            --settings "RELEASE_SHA=$TARGET_SHA" \
+            --output none
+          az webapp deploy \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_APP_NAME" \
+            --src-path "${{ steps.package.outputs.archive }}" \
+            --type zip \
+            --clean true \
+            --restart true \
+            --async false \
+            --output none
+
+      - name: Run production gates
+        run: scripts/release/probe-release.sh "$APP_URL"
+
+      - name: Roll back failed application deployment
+        id: rollback
+        if: failure() && steps.deploy.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PREVIOUS_BLOB: ${{ needs.plan.outputs.previous_blob }}
+          PREVIOUS_SHA: ${{ needs.plan.outputs.previous_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PREVIOUS_BLOB" ] || [ -z "$PREVIOUS_SHA" ]; then
+            echo "::error::No previous successful package is available for rollback."
             exit 1
           fi
-          echo "deployment_url=$deployment_url" >>"$GITHUB_OUTPUT"
-          vercel_deployment_id="$(
-            npx --yes vercel@59.26.0 inspect "$deployment_url" \
-              --wait \
-              --timeout=5m \
-              --json \
-              --token="$VERCEL_TOKEN" |
-              jq -er '.id'
-          )"
-          echo "vercel_deployment_id=$vercel_deployment_id" >>"$GITHUB_OUTPUT"
+          az storage blob download \
+            --account-name "$AZURE_STORAGE_ACCOUNT" \
+            --auth-mode login \
+            --container-name "$AZURE_RELEASE_CONTAINER" \
+            --name "$PREVIOUS_BLOB" \
+            --file previous.zip \
+            --only-show-errors
+          az webapp config appsettings set \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_APP_NAME" \
+            --settings "RELEASE_SHA=$PREVIOUS_SHA" \
+            --output none
+          az webapp deploy \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_APP_NAME" \
+            --src-path previous.zip \
+            --type zip \
+            --clean true \
+            --restart true \
+            --async false \
+            --output none
+          EXPECTED_RELEASE_SHA="$PREVIOUS_SHA" scripts/release/probe-release.sh "$APP_URL"
+          echo "verified=true" >>"$GITHUB_OUTPUT"
 
-      - name: Run production health gate
+      - name: Record production result
+        if: always() && steps.deployment.outputs.deployment_id != ''
         shell: bash
         env:
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
-        run: |
-          set -euo pipefail
-          scripts/release/probe-release.sh "$DEPLOYMENT_URL"
-          if [ "${APP_URL%/}" != "${DEPLOYMENT_URL%/}" ]; then
-            scripts/release/probe-release.sh "$APP_URL"
-          fi
-
-      - name: Abort rollout and roll back
-        if: failure() && steps.deploy.outputs.deployment_url != ''
-        shell: bash
-        env:
-          PREVIOUS_PRODUCTION_URL: ${{ needs.plan.outputs.previous_production_url }}
-          VERCEL_DEPLOYMENT_ID: ${{ steps.deploy.outputs.vercel_deployment_id }}
-        run: |
-          set +e
-          npx --yes vercel@59.26.0 rolling-release abort \
-            --dpl="$VERCEL_DEPLOYMENT_ID" \
-            --token="$VERCEL_TOKEN"
-          abort_status=$?
-
-          rollback_status=0
-          if [ -n "$PREVIOUS_PRODUCTION_URL" ]; then
-            npx --yes vercel@59.26.0 rollback "$PREVIOUS_PRODUCTION_URL" \
-              --yes \
-              --token="$VERCEL_TOKEN"
-            rollback_status=$?
-          else
-            echo "::error::No previous successful production URL is recorded; automatic rollback is unavailable."
-            rollback_status=1
-          fi
-
-          if [ "$abort_status" -ne 0 ]; then
-            echo "::warning::No active rolling release was aborted, or Vercel was unavailable."
-          fi
-          exit "$rollback_status"
-
-      - name: Record production deployment result
-        if: always() && steps.github_deployment.outputs.deployment_id != ''
-        shell: bash
-        env:
-          DEPLOYMENT_ID: ${{ steps.github_deployment.outputs.deployment_id }}
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
           JOB_STATUS: ${{ job.status }}
+          ROLLBACK_VERIFIED: ${{ steps.rollback.outputs.verified }}
         run: |
           set -euo pipefail
-          state="failure"
-          description="Production promotion or health gate failed"
-          if [ "$JOB_STATUS" = "success" ]; then
-            state="success"
-            description="Production promotion and probes passed"
+          state=failure
+          description="Azure production release failed"
+          if [ "$JOB_STATUS" = success ]; then
+            state=success
+            description="Azure production deployment and probes passed"
+          elif [ "$ROLLBACK_VERIFIED" = true ]; then
+            description="Azure production release failed; previous package restored"
           fi
-          arguments=(
-            --method POST
-            "repos/${REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses"
-            -f "state=${state}"
-            -f "log_url=${RUN_URL}"
-            -f "description=${description}"
-          )
-          if [ -n "$DEPLOYMENT_URL" ]; then
-            arguments+=(-f "environment_url=${DEPLOYMENT_URL}")
-          fi
-          gh api "${arguments[@]}" >/dev/null
+          gh api --method POST \
+            "repos/${REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" \
+            -f state="$state" \
+            -f log_url="$RUN_URL" \
+            -f environment_url="$APP_URL" \
+            -f description="$description" >/dev/null
 
-      - name: Write production evidence
+      - name: Write release evidence
         if: always()
         shell: bash
         env:
-          DEPLOYMENT_ID: ${{ steps.github_deployment.outputs.deployment_id }}
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment_url }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
           JOB_STATUS: ${{ job.status }}
-          PREVIOUS_SHA: ${{ needs.plan.outputs.previous_production_sha }}
-          PREVIOUS_URL: ${{ needs.plan.outputs.previous_production_url }}
-          VERCEL_DEPLOYMENT_ID: ${{ steps.deploy.outputs.vercel_deployment_id }}
+          PACKAGE_BLOB: ${{ steps.package.outputs.blob_name }}
+          PREVIOUS_BLOB: ${{ needs.plan.outputs.previous_blob }}
+          PREVIOUS_SHA: ${{ needs.plan.outputs.previous_sha }}
+          ROLLBACK_VERIFIED: ${{ steps.rollback.outputs.verified }}
         run: |
           jq -n \
+            --arg app_url "$APP_URL" \
             --arg deployment_id "$DEPLOYMENT_ID" \
-            --arg deployment_url "$DEPLOYMENT_URL" \
-            --arg vercel_deployment_id "$VERCEL_DEPLOYMENT_ID" \
-            --arg environment_url "$APP_URL" \
-            --arg environment "production" \
             --arg outcome "$JOB_STATUS" \
+            --arg package_blob "$PACKAGE_BLOB" \
+            --arg previous_blob "$PREVIOUS_BLOB" \
             --arg previous_sha "$PREVIOUS_SHA" \
-            --arg previous_url "$PREVIOUS_URL" \
+            --arg rollback_verified "$ROLLBACK_VERIFIED" \
             --arg run_url "$RUN_URL" \
             --arg target_sha "$TARGET_SHA" \
             --arg timestamp "$(date -u +%FT%TZ)" \
             '{
-              deployment_id: $deployment_id,
-              deployment_url: $deployment_url,
-              vercel_deployment_id: $vercel_deployment_id,
-              environment_url: $environment_url,
-              environment: $environment,
-              outcome: $outcome,
-              previous_production_sha: $previous_sha,
-              previous_production_url: $previous_url,
-              run_url: $run_url,
-              target_sha: $target_sha,
-              timestamp: $timestamp
-            }' > production-release-evidence.json
+              app_url:$app_url,
+              deployment_id:$deployment_id,
+              outcome:$outcome,
+              package_blob:$package_blob,
+              previous_blob:$previous_blob,
+              previous_sha:$previous_sha,
+              rollback_verified:($rollback_verified == "true"),
+              run_url:$run_url,
+              target_sha:$target_sha,
+              timestamp:$timestamp
+            }' >production-release-evidence.json
 
-      - name: Upload production evidence
+      - name: Upload release evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -506,16 +424,16 @@ jobs:
           path: production-release-evidence.json
           retention-days: 90
 
-      - name: Report production failure
+      - name: Report release failure
         if: failure()
         env:
-          RELEASE_PHASE: production
-        run: scripts/release/incident.sh report "Production migration, promotion, health gate, abort, or rollback failed."
+          RELEASE_PHASE: azure-production
+        run: scripts/release/incident.sh report "Azure migration, deployment, production gates, or rollback failed."
 
       - name: Resolve recovered release incident
         if: success()
         env:
-          RELEASE_PHASE: production
+          RELEASE_PHASE: azure-production
         run: scripts/release/incident.sh resolve
 
   monitor:
@@ -527,14 +445,12 @@ jobs:
     environment: production
     env:
       APP_URL: ${{ vars.APP_URL }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      EXPECTED_RELEASE_SHA: ${{ needs.plan.outputs.target_sha }}
       TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Check out deployed SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -544,52 +460,43 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate production bootstrap
-        run: scripts/release/validate-config.sh production
-
-      - name: Pull and validate current Vercel configuration
+      - name: Read probe configuration
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes vercel@59.26.0 pull \
-            --yes \
-            --environment=production \
-            --token="$VERCEL_TOKEN"
-          scripts/release/validate-vercel-env.sh production
+          database_url="$(az keyvault secret show --vault-name "$AZURE_KEY_VAULT_NAME" --name database-url --query value --output tsv)"
+          probe_token="$(az keyvault secret show --vault-name "$AZURE_KEY_VAULT_NAME" --name synthetic-probe-token --query value --output tsv)"
+          echo "::add-mask::$database_url"
+          echo "::add-mask::$probe_token"
+          {
+            echo "DATABASE_URL=$database_url"
+            echo "SYNTHETIC_PROBE_TOKEN=$probe_token"
+          } >>"$GITHUB_ENV"
 
       - name: Run scheduled production probes
         run: scripts/release/probe-release.sh "$APP_URL"
 
-      - name: Abort an unhealthy active rollout
-        if: failure()
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          vercel_deployment_id="$(
-            npx --yes vercel@59.26.0 inspect "$APP_URL" \
-              --json \
-              --token="$VERCEL_TOKEN" |
-              jq -er '.id'
-          )"
-          npx --yes vercel@59.26.0 rolling-release abort \
-            --dpl="$vercel_deployment_id" \
-            --token="$VERCEL_TOKEN"
-
       - name: Report production health failure
         if: failure()
         env:
-          RELEASE_PHASE: production-monitor
-        run: scripts/release/incident.sh report "Scheduled production health or safe synthetic probes failed. Any active rolling release was aborted; no version rollback was attempted without a newly promoted release to attribute."
+          RELEASE_PHASE: azure-production-monitor
+        run: scripts/release/incident.sh report "Scheduled Azure production health or synthetic-order probes failed."
 
       - name: Resolve recovered release incident
         if: success()
         env:
-          RELEASE_PHASE: production-monitor
+          RELEASE_PHASE: azure-production-monitor
         run: scripts/release/incident.sh resolve

@@ -7,11 +7,11 @@ export default function CheckoutSuccessPage() {
         <span className="success-icon" aria-hidden="true">
           ✓
         </span>
-        <p className="eyebrow">Payment confirmed</p>
-        <h1>Your stickers are entering the meme supply chain.</h1>
+        <p className="eyebrow">Test order confirmed</p>
+        <h1>Your sticker order entered the meme supply chain.</h1>
         <p>
-          A receipt is on its way. Fulfillment is mocked in this release, so no
-          physical shipment will be created yet.
+          No payment was collected. Fulfillment is mocked in this release, so
+          no physical shipment will be created.
         </p>
         <Link className="button button-primary" href="/">
           Return to the sticker floor
