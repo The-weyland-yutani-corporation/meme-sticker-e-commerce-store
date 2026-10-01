@@ -3,9 +3,9 @@ name: Factory pull request dispatcher
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review]
-  workflow_run:
-    workflows: ["Factory implementer"]
-    types: [completed]
+  schedule:
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+  workflow_dispatch:
 
 permissions:
   actions: write
@@ -14,36 +14,82 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: factory-pr-dispatch-${{ github.event.pull_request.number || github.event.workflow_run.id }}
+  group: factory-pr-dispatch
   cancel-in-progress: false
 
 jobs:
   dispatch:
     name: Dispatch PR validation and reviews
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
     steps:
-      - name: Resolve pull request and dispatch current head
+      - name: Reconcile pull requests and dispatch current heads
         shell: bash
         run: |
           set -euo pipefail
 
-          pr_number=""
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            pr_number="${{ github.event.pull_request.number }}"
-          else
-            [ "${{ github.event.workflow_run.conclusion }}" = "success" ] || exit 0
+          function verify_implementer_provenance() {
+            local pr_number="$1"
+            local pr_url="$2"
+            local pr_body="$3"
+            local head_sha="$4"
+            local run_id
+            run_id="$(
+              sed -nE \
+                's/.*gh-aw-agentic-workflow: Factory implementer, engine: [^,]+, model: [^,]+, id: ([0-9]+), workflow_id: factory-implement.*/\1/p' \
+                <<<"$pr_body" |
+              tail -1
+            )"
+            [ -n "$run_id" ] || return 1
+
+            local run
+            run="$(gh api "repos/$REPOSITORY/actions/runs/$run_id")"
+            [ "$(jq -r '.conclusion' <<<"$run")" = "success" ] &&
+              [ "$(jq -r '.event' <<<"$run")" = "workflow_dispatch" ] &&
+              [ "$(jq -r '.name' <<<"$run")" = "Factory implementer" ] &&
+              [ "$(jq -r '.path' <<<"$run")" = ".github/workflows/factory-implement.lock.yml" ] &&
+              [ "$(jq -r '.repository.full_name' <<<"$run")" = "$REPOSITORY" ] ||
+              return 1
+
+            local artifact_dir
+            artifact_dir="$(mktemp -d)"
+            if ! gh run download "$run_id" \
+              --repo "$REPOSITORY" \
+              --name "safe-outputs-items" \
+              --dir "$artifact_dir" >/dev/null 2>&1; then
+              rm -rf "$artifact_dir"
+              return 1
+            fi
+
+            local artifact_matches=1
+            if jq -e \
+                --arg repo "$REPOSITORY" \
+                --arg url "$pr_url" \
+                --argjson number "$pr_number" \
+                '
+                  select(
+                    .type == "create_pull_request" and
+                    .repo == $repo and
+                    .number == $number and
+                    .url == $url
+                  )
+                ' "$artifact_dir/safe-output-items.jsonl" >/dev/null; then
+              artifact_matches=0
+            fi
+            rm -rf "$artifact_dir"
+            [ "$artifact_matches" -eq 0 ] || return 1
+
+            local issue_number
             issue_number="$(
               gh issue list \
                 --repo "$REPOSITORY" \
                 --state open \
-                --label "factory:active" \
                 --limit 100 \
                 --json number,comments \
-                --jq --arg run "${{ github.event.workflow_run.id }}" '
+                --jq --arg run "$run_id" '
                   [
                     .[] |
                     select(
@@ -60,128 +106,156 @@ jobs:
                   if length == 1 then .[0].number else empty end
                 '
             )"
-            [ -n "$issue_number" ] || exit 0
-            open_prs="$(
-              gh pr list \
+            [ -n "$issue_number" ] || return 1
+
+            local marker
+            marker="<!-- FACTORY_PROVENANCE issue=$issue_number run=$run_id -->"
+            if ! gh api \
+              --paginate \
+              "repos/$REPOSITORY/issues/$pr_number/comments" \
+              --jq --arg marker "$marker" '
+                any(
+                  .[];
+                  .user.login == "github-actions[bot]" and
+                  (.body | contains($marker))
+                )
+              ' | grep -Fqx "true"; then
+              gh issue comment "$pr_number" \
                 --repo "$REPOSITORY" \
-                --state open \
-                --label "factory:managed" \
-                --limit 100 \
-                --json number \
-                --jq '.[].number'
-            )"
-            matched_count=0
-            while read -r candidate; do
-              [ -n "$candidate" ] || continue
-              linked="$(
-                gh pr view "$candidate" \
-                  --repo "$REPOSITORY" \
-                  --json closingIssuesReferences \
-                  --jq '.closingIssuesReferences[].number'
-              )"
-              if grep -Fqx "$issue_number" <<<"$linked"; then
-                pr_number="$candidate"
-                matched_count="$((matched_count + 1))"
-              fi
-            done <<<"$open_prs"
-            [ "$matched_count" -eq 1 ] || exit 1
-          fi
+                --body "Factory provenance verified for issue #$issue_number, implementer run $run_id, and current head \`$head_sha\`.
 
-          [ -n "$pr_number" ] || exit 0
-          pr_api="$(
-            gh api "repos/$REPOSITORY/pulls/$pr_number"
-          )"
-          [ "$(jq -r '.head.repo.full_name' <<<"$pr_api")" = "$REPOSITORY" ] ||
-            exit 0
-
-          pr="$(
-            gh pr view "$pr_number" \
-              --repo "$REPOSITORY" \
-              --json author,headRefName,headRefOid,isDraft,labels,title
-          )"
-          [ "$(jq -r '.isDraft' <<<"$pr")" = "false" ] || exit 0
-
-          author="$(jq -r '.author.login' <<<"$pr")"
-          head_ref="$(jq -r '.headRefName' <<<"$pr")"
-          head_sha="$(jq -r '.headRefOid' <<<"$pr")"
-          title="$(jq -r '.title' <<<"$pr")"
-          association="$(jq -r '.author_association' <<<"$pr_api")"
-
-          if [ "$author" != "dependabot" ] &&
-            [ "$author" != "dependabot[bot]" ]; then
-            case "$association" in
-              OWNER|MEMBER|COLLABORATOR) ;;
-              *) exit 0 ;;
-            esac
-          fi
-
-          if {
-            [[ "$head_ref" == factory/* ]] && [[ "$title" == "[factory] "* ]]
-          } || {
-            { [ "$author" = "dependabot" ] || [ "$author" = "dependabot[bot]" ]; } &&
-            [[ "$head_ref" == dependabot/* ]]
-          }; then
-            if ! jq -e '.labels[].name | select(. == "factory:managed")' \
-              <<<"$pr" >/dev/null; then
-              if [ "${{ github.event_name }}" = "workflow_run" ]; then
-                gh issue edit "$pr_number" \
-                  --repo "$REPOSITORY" \
-                  --add-label "factory:managed"
-              else
-                exit 0
-              fi
+          $marker" >/dev/null
             fi
-          else
-            exit 0
-          fi
+
+            printf '%s\n' "$issue_number"
+          }
 
           function dispatch_once() {
             local workflow="$1"
-            shift
+            local head_ref="$2"
+            local head_sha="$3"
+            shift 3
+
+            local runs
             runs="$(
               gh run list \
                 --repo "$REPOSITORY" \
                 --workflow "$workflow" \
                 --branch "$head_ref" \
-                --limit 20 \
+                --limit 30 \
                 --json headSha,status,conclusion
             )"
+            local existing
             existing="$(
               jq --arg sha "$head_sha" '
-                  [
-                    .[] |
-                    select(.headSha == $sha) |
-                    select(
-                      .status == "queued" or
-                      .status == "in_progress" or
-                      .status == "waiting" or
-                      .status == "requested" or
-                      .status == "pending" or
-                      .conclusion == "success"
-                    )
-                  ] | length
-                ' <<<"$runs"
+                [
+                  .[] |
+                  select(.headSha == $sha) |
+                  select(
+                    .status == "queued" or
+                    .status == "in_progress" or
+                    .status == "waiting" or
+                    .status == "requested" or
+                    .status == "pending" or
+                    .conclusion == "success"
+                  )
+                ] | length
+              ' <<<"$runs"
             )"
             [ "$existing" -eq 0 ] || return 0
+
             gh workflow run "$workflow" \
               --repo "$REPOSITORY" \
               --ref "$head_ref" \
               "$@"
           }
 
-          context="$(
-            jq -cn \
-              --argjson pull_request "$pr_number" \
-              --arg head_sha "$head_sha" \
-              '{
-                item_type: "pull_request",
-                item_number: $pull_request,
-                head_sha: $head_sha,
-                instruction: "Review exactly this pull request and current head."
-              }'
-          )"
+          function reconcile_pr() {
+            local pr_number="$1"
+            local pr_api
+            pr_api="$(gh api "repos/$REPOSITORY/pulls/$pr_number")"
+            [ "$(jq -r '.state' <<<"$pr_api")" = "open" ] || return 0
+            [ "$(jq -r '.draft' <<<"$pr_api")" = "false" ] || return 0
+            [ "$(jq -r '.head.repo.full_name' <<<"$pr_api")" = "$REPOSITORY" ] ||
+              return 0
 
-          dispatch_once "ci.yml"
-          dispatch_once "codeql.yml"
-          dispatch_once "factory-review.lock.yml" -f "aw_context=$context"
-          dispatch_once "factory-security-review.lock.yml" -f "aw_context=$context"
+            local author head_ref head_sha title body pr_url association
+            author="$(jq -r '.user.login' <<<"$pr_api")"
+            head_ref="$(jq -r '.head.ref' <<<"$pr_api")"
+            head_sha="$(jq -r '.head.sha' <<<"$pr_api")"
+            title="$(jq -r '.title' <<<"$pr_api")"
+            body="$(jq -r '.body // ""' <<<"$pr_api")"
+            pr_url="$(jq -r '.html_url' <<<"$pr_api")"
+            association="$(jq -r '.author_association' <<<"$pr_api")"
+
+            if [ "$author" = "github-actions[bot]" ]; then
+              [[ "$head_ref" == factory/* ]] &&
+                [[ "$title" == "[factory] "* ]] ||
+                return 0
+              verify_implementer_provenance \
+                "$pr_number" "$pr_url" "$body" "$head_sha" >/dev/null ||
+                return 0
+            elif {
+              [ "$author" = "dependabot" ] ||
+              [ "$author" = "dependabot[bot]" ];
+            }; then
+              [[ "$head_ref" == dependabot/* ]] || return 0
+            else
+              case "$association" in
+                OWNER|MEMBER|COLLABORATOR) ;;
+                *) return 0 ;;
+              esac
+              [[ "$head_ref" == factory/* ]] &&
+                [[ "$title" == "[factory] "* ]] ||
+                return 0
+            fi
+
+            local labels
+            labels="$(gh pr view "$pr_number" --repo "$REPOSITORY" --json labels)"
+            jq -e '.labels[].name | select(. == "factory:managed")' \
+              <<<"$labels" >/dev/null ||
+              return 0
+
+            local context
+            context="$(
+              jq -cn \
+                --argjson pull_request "$pr_number" \
+                --arg head_sha "$head_sha" \
+                '{
+                  item_type: "pull_request",
+                  item_number: $pull_request,
+                  head_sha: $head_sha,
+                  instruction: "Review exactly this pull request and current head."
+                }'
+            )"
+
+            dispatch_once "ci.yml" "$head_ref" "$head_sha"
+            dispatch_once "codeql.yml" "$head_ref" "$head_sha"
+            dispatch_once \
+              "factory-review.lock.yml" \
+              "$head_ref" \
+              "$head_sha" \
+              -f "aw_context=$context"
+            dispatch_once \
+              "factory-security-review.lock.yml" \
+              "$head_ref" \
+              "$head_sha" \
+              -f "aw_context=$context"
+          }
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            reconcile_pr "${{ github.event.pull_request.number }}"
+            exit 0
+          fi
+
+          gh pr list \
+            --repo "$REPOSITORY" \
+            --state open \
+            --label "factory:managed" \
+            --limit 50 \
+            --json number \
+            --jq '.[].number' |
+          while read -r pr_number; do
+            [ -n "$pr_number" ] || continue
+            reconcile_pr "$pr_number"
+          done
