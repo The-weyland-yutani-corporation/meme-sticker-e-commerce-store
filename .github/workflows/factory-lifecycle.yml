@@ -141,7 +141,7 @@ jobs:
             [ -n "$encoded" ] || continue
             issue="$(
               base64 --decode <<<"$encoded" |
-              jq -Rs 'split("\t") | {number: .[0], comments: .[1]}'
+              jq '{number: .[0], comments: .[1]}'
             )"
             issue_number="$(jq -r '.number' <<<"$issue")"
             run_id="$(
