@@ -8,6 +8,12 @@ credentials in implementation or review jobs.
 1. Enable Actions, Issues, Dependabot, and secret scanning.
 2. Install the `gh-aw` extension and compile each `.github/workflows/factory-*.md`.
 3. Commit each generated `.lock.yml`.
+   Use the repository-compatible `gh-aw` compiler version `v0.88.8` and compile
+   with `--action-mode action --action-tag
+   5e508589e03a7757a7e05b26e834292f5445bfb6`. Commit
+   `.github/aw/actions-lock.json` with the generated workflows. This preserves
+   the validated runtime while pinning `github/gh-aw-actions/setup` to the
+   immutable commit behind release `v0.88.8`.
 4. Create a `main` ruleset that:
    - requires pull requests;
    - requires `CI / Validate` and `CodeQL / Analyze`;
