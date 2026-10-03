@@ -1,6 +1,6 @@
 param(
   [string]$SubscriptionId = $env:AZURE_SUBSCRIPTION_ID,
-  [string]$Location = "eastus2",
+  [string]$Location = "centralus",
   [string]$ResourceGroup = "rg-meme-forge-production",
   [string]$IdentityName = "id-meme-forge-github",
   [string]$Repository = "The-weyland-yutani-corporation/meme-sticker-e-commerce-store",
@@ -83,6 +83,8 @@ az deployment group create `
   --template-file "infra/main.bicep" `
   --parameters "infra/main.bicepparam" `
   --parameters `
+    location=$Location `
+    namePrefix=$NamePrefix `
     deploymentPrincipalObjectId=$($identity.principalId) `
     postgresAdminPassword=$postgresPassword `
     syntheticProbeToken=$probeToken `

@@ -1,4 +1,4 @@
 using './main.bicep'
 
-param location = 'eastus2'
+param location = 'centralus'
 param namePrefix = 'memeforge'
