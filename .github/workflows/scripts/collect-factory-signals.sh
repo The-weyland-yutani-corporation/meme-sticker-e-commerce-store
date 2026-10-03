@@ -528,34 +528,67 @@ collect_dependency_security() {
       --state open \
       --author "app/dependabot" \
       --limit 100 \
-      --json number,title,url,createdAt,updatedAt,isDraft,statusCheckRollup
+      --json number,title,url,createdAt,updatedAt,isDraft,headRefOid
   )"
-  actionable_prs="$(
-    jq -c --argjson now "$NOW_EPOCH" '
-      [
-        .[] |
-        . + {
-          age_days: ((($now - (.createdAt | fromdateiso8601)) / 86400) | floor),
-          failed_checks: [
-            .statusCheckRollup[]? |
-            select(
-              (.conclusion // .state // "") as $conclusion |
-              ["ACTION_REQUIRED","CANCELLED","FAILURE","STALE","STARTUP_FAILURE","TIMED_OUT"] |
-              index($conclusion)
-            )
-          ] | length
-        } |
-        select(.age_days >= 7 or .failed_checks > 0) |
-        {
+  actionable_prs='[]'
+  while IFS= read -r dependabot_pr; do
+    local head_sha
+    local failed_statuses
+    local failed_check_runs
+    local failed_checks
+    local age_days
+    local actionable_pr
+
+    head_sha="$(jq -r '.headRefOid' <<<"$dependabot_pr")"
+    failed_statuses="$(
+      gh api "repos/$REPOSITORY/commits/$head_sha/status" \
+        --jq '[
+          .statuses[]? |
+          select(.state == "error" or .state == "failure")
+        ] | length' 2>/dev/null ||
+        printf '0'
+    )"
+    failed_check_runs="$(
+      gh api "repos/$REPOSITORY/commits/$head_sha/check-runs?per_page=100" \
+        --jq '[
+          .check_runs[]? |
+          select(
+            .conclusion == "action_required" or
+            .conclusion == "cancelled" or
+            .conclusion == "failure" or
+            .conclusion == "stale" or
+            .conclusion == "startup_failure" or
+            .conclusion == "timed_out"
+          )
+        ] | length' 2>/dev/null ||
+        printf '0'
+    )"
+    failed_checks="$((failed_statuses + failed_check_runs))"
+    age_days="$(
+      jq -nr \
+        --arg created_at "$(jq -r '.createdAt' <<<"$dependabot_pr")" \
+        --argjson now "$NOW_EPOCH" \
+        '((($now - ($created_at | fromdateiso8601)) / 86400) | floor)'
+    )"
+    if (( age_days < 7 && failed_checks == 0 )); then
+      continue
+    fi
+    actionable_pr="$(
+      jq -c \
+        --argjson age_days "$age_days" \
+        --argjson failed_checks "$failed_checks" \
+        '{
           number,
           title,
           url,
-          age_days,
-          failed_checks
-        }
-      ]
-    ' <<<"$dependabot_prs"
-  )"
+          age_days:$age_days,
+          failed_checks:$failed_checks
+        }' <<<"$dependabot_pr"
+    )"
+    actionable_prs="$(
+      jq -c --argjson item "$actionable_pr" '. + [$item]' <<<"$actionable_prs"
+    )"
+  done < <(jq -c '.[]' <<<"$dependabot_prs")
 
   if dependabot_alerts="$(
     gh api --paginate --slurp \
