@@ -206,6 +206,8 @@ jobs:
             --template-file infra/main.bicep \
             --parameters infra/main.bicepparam \
             --parameters \
+              location="$AZURE_LOCATION" \
+              namePrefix="$AZURE_NAME_PREFIX" \
               deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
               postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
               syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
@@ -216,6 +218,8 @@ jobs:
             --template-file infra/main.bicep \
             --parameters infra/main.bicepparam \
             --parameters \
+              location="$AZURE_LOCATION" \
+              namePrefix="$AZURE_NAME_PREFIX" \
               deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
               postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
               syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \

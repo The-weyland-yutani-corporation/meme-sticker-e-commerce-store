@@ -31,7 +31,7 @@ optimizations only.
 ## Azure owner bootstrap
 
 The selected production topology is one direct-production Azure App Service and
-one Azure Database for PostgreSQL Flexible Server in East US 2. There is no
+one Azure Database for PostgreSQL Flexible Server in Central US. There is no
 staging environment or deployment slot.
 
 Prerequisites:
@@ -40,17 +40,42 @@ Prerequisites:
   resource group, user-assigned identity, federated credential, role
   assignment, budget, and repository environment variables.
 - The active Azure subscription is approved for billable resources.
-- The GitHub organization required-workflow ruleset is active.
+- The repository guardrail ruleset is active. The external organization
+  required-workflow rollout remains tracked and must complete before
+  `FACTORY_ROOT_BOOTSTRAP_SHA` is removed.
 
-Run from the repository root:
+First run the read-only preflight from the repository root:
 
 ```powershell
-.\scripts\azure\bootstrap-production.ps1 -SubscriptionId "<azure-subscription-id>"
+.\scripts\azure\preflight-production.ps1 `
+  -SubscriptionId "<azure-subscription-id>" `
+  -Location "centralus" `
+  -OutputPath "<session-evidence-path>\azure-production-preflight.json"
+```
+
+The preflight creates no cloud resources, credentials, role assignments,
+budgets, or GitHub settings. It reports `ready`, `blocked`, or
+`already_configured` and verifies the active subscription and tenant, inherited
+Owner access, provider registration, Central US App Service and PostgreSQL
+capabilities, existing resource and federation conflicts, GitHub repository
+administration, budget access, Bicep compilation, exact resource names, and a
+provider-level subscription deployment what-if.
+
+Review the structured report and resolve every blocked check. Creating the
+production resources is a separate billable and permission-changing action that
+requires explicit approval immediately before execution.
+
+After approval, run:
+
+```powershell
+.\scripts\azure\bootstrap-production.ps1 `
+  -SubscriptionId "<azure-subscription-id>" `
+  -Location "centralus"
 ```
 
 The script:
 
-- creates `rg-meme-forge-production` in East US 2;
+- creates `rg-meme-forge-production` in Central US;
 - creates a user-assigned Azure identity and GitHub OIDC federation scoped to
   the repository's `production` environment;
 - grants the identity Contributor on the dedicated resource group, Storage Blob
