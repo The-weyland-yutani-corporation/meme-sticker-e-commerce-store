@@ -50,6 +50,10 @@ jobs:
           target_is_live=false
 
           while IFS= read -r deployment; do
+            [ "$(jq -r '.description // empty' <<<"$deployment")" = \
+              "Autonomous Azure production release" ] || continue
+            [ -n "$(jq -r '.payload.package_blob? // empty' <<<"$deployment")" ] ||
+              continue
             deployment_id="$(jq -r '.id' <<<"$deployment")"
             status="$(
               gh api \
@@ -109,6 +113,37 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Validate Azure environment identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            APP_URL
+            AZURE_APP_NAME
+            AZURE_CLIENT_ID
+            AZURE_KEY_VAULT_NAME
+            AZURE_LOCATION
+            AZURE_NAME_PREFIX
+            AZURE_POSTGRES_NAME
+            AZURE_PRINCIPAL_OBJECT_ID
+            AZURE_RELEASE_CONTAINER
+            AZURE_RESOURCE_GROUP
+            AZURE_STORAGE_ACCOUNT
+            AZURE_SUBSCRIPTION_ID
+            AZURE_TENANT_ID
+          )
+          missing=()
+          for variable_name in "${required[@]}"; do
+            if [ -z "${!variable_name:-}" ]; then
+              missing+=("$variable_name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Azure production bootstrap is incomplete. Missing environment variables: %s\n' \
+              "${missing[*]}" >&2
+            exit 1
+          fi
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
