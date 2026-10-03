@@ -42,7 +42,9 @@ ensure_label() {
   local name="$1"
   local color="$2"
   local description="$3"
-  if gh label view "$name" --repo "$REPOSITORY" >/dev/null 2>&1; then
+  local encoded_name
+  encoded_name="$(jq -rn --arg value "$name" '$value | @uri')"
+  if gh api "repos/$REPOSITORY/labels/$encoded_name" >/dev/null 2>&1; then
     return
   fi
   if [ "$DRY_RUN" = "1" ]; then
@@ -53,7 +55,7 @@ ensure_label() {
     --repo "$REPOSITORY" \
     --color "$color" \
     --description "$description"; then
-    gh label view "$name" --repo "$REPOSITORY" >/dev/null
+    gh api "repos/$REPOSITORY/labels/$encoded_name" >/dev/null
   fi
 }
 
@@ -1243,6 +1245,9 @@ close_cleared_signals() {
         head -n 1
     )"
     [ -n "$fingerprint" ] && [ -n "$category" ] || continue
+    if [ "$fingerprint" = "production-release:autonomous-controller" ]; then
+      continue
+    fi
     grep -Fxq "$category" "$evaluated_categories" || continue
     if grep -Fqx "$category"$'\t'"$fingerprint" "$active_signals"; then
       continue
