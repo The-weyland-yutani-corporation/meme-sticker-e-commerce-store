@@ -49,7 +49,7 @@ describe("GitHub Actions OIDC verification", () => {
     ).toBe(true);
   });
 
-  it("accepts GitHub's documented production-environment subject", () => {
+  it("accepts the legacy name-based production-environment subject", () => {
     expect(
       verifyGitHubActionsOidcToken(
         createToken({

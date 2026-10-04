@@ -10,6 +10,7 @@ const repository =
   "The-weyland-yutani-corporation/meme-sticker-e-commerce-store";
 const repositoryId = "1385623955";
 const repositoryOwnerId = "264313301";
+// https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/
 const productionSubjects = new Set([
   `repo:${repository}:environment:production`,
   "repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production",

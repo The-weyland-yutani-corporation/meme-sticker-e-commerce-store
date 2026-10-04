@@ -164,7 +164,15 @@ owner IDs, and production-environment subject are validated before each
 continuous synthetic order. The bootstrap reads the repository's live OIDC
 configuration and reconciles Azure federation to the configured production
 subject. Probe validation accepts only that repository's configured immutable
-subject or GitHub's documented production-environment subject.
+subject or the legacy name-based production-environment subject during
+migration. GitHub's
+[immutable-subject announcement](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/)
+documents the `repo:owner@owner_id/repository@repository_id` format, and the
+[repository OIDC API](https://docs.github.com/en/rest/actions/oidc#get-the-customization-template-for-an-oidc-subject-claim-for-a-repository)
+documents the `use_immutable_subject` and `sub_claim_prefix` response fields.
+Microsoft's
+[Entra migration guidance](https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-github-immutable-subjects)
+independently documents the same format and federated-credential configuration.
 
 ## Production signals
 

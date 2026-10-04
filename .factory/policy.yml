@@ -19,7 +19,10 @@ authority:
     controlled_paths:
       - ".factory/**"
       - ".github/**"
+      - ".azure/**"
+      - "docs/factory-bootstrap.md"
       - "infra/**"
+      - "scripts/azure/**"
     required_labels:
       - factory:managed
       - factory:governance

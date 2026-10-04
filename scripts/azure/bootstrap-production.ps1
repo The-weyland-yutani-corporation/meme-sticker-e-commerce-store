@@ -28,6 +28,8 @@ $identity = az identity create `
   --name $IdentityName `
   --location $Location | ConvertFrom-Json
 
+# GitHub documents use_immutable_subject and sub_claim_prefix in this response:
+# https://docs.github.com/en/rest/actions/oidc#get-the-customization-template-for-an-oidc-subject-claim-for-a-repository
 $oidcCustomization = gh api "repos/$Repository/actions/oidc/customization/sub" | ConvertFrom-Json
 if ($oidcCustomization.use_immutable_subject -and $oidcCustomization.sub_claim_prefix) {
   $subject = "$($oidcCustomization.sub_claim_prefix):environment:production"
