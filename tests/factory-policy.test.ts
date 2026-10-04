@@ -17,6 +17,7 @@ const preflight = readFileSync(
 const parameters = readFileSync("infra/main.bicepparam", "utf8");
 const bootstrapDocs = readFileSync("docs/factory-bootstrap.md", "utf8");
 const infrastructure = readFileSync("infra/main.bicep", "utf8");
+const reconciliation = readFileSync("infra/reconcile.bicep", "utf8");
 const releaseWorkflow = readFileSync(
   ".github/workflows/release-health.yml",
   "utf8",
@@ -24,6 +25,10 @@ const releaseWorkflow = readFileSync(
 const packageApp = readFileSync("scripts/release/package-app.sh", "utf8");
 const startProduction = readFileSync(
   "scripts/release/start-production.sh",
+  "utf8",
+);
+const verifyStartup = readFileSync(
+  "scripts/release/verify-startup.mjs",
   "utf8",
 );
 
@@ -75,6 +80,18 @@ describe("factory infrastructure authority", () => {
     expect(infrastructure).toContain(
       "resource blobPrivateEndpoint 'Microsoft.Network/privateEndpoints",
     );
+    expect(infrastructure).toContain(
+      "value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=database-url)'",
+    );
+    expect(infrastructure).toContain(
+      "value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=synthetic-probe-token)'",
+    );
+    expect(reconciliation).toContain(
+      "postgresAdminPassword: keyVault.getSecret('postgres-admin-password')",
+    );
+    expect(reconciliation).toContain(
+      "syntheticProbeToken: keyVault.getSecret('synthetic-probe-token')",
+    );
   });
 
   it("keeps runner releases off private Azure data planes", () => {
@@ -82,6 +99,7 @@ describe("factory infrastructure authority", () => {
     expect(releaseWorkflow).toContain('gh run download "$PREVIOUS_RUN_ID"');
     expect(releaseWorkflow).not.toContain("az storage blob");
     expect(releaseWorkflow).not.toContain("az keyvault secret");
+    expect(releaseWorkflow).not.toContain("az webapp config appsettings list");
     expect(releaseWorkflow).not.toContain(
       "postgres flexible-server firewall-rule create",
     );
@@ -97,6 +115,9 @@ describe("factory infrastructure authority", () => {
     expect(startProduction).toContain(
       "node node_modules/prisma/build/index.js migrate deploy",
     );
-    expect(startProduction).toContain("exec node server.js");
+    expect(startProduction).toContain("node verify-startup.mjs");
+    expect(startProduction).toContain('wait "$server_pid"');
+    expect(verifyStartup).toContain("/api/internal/synthetic-order");
+    expect(verifyStartup).toContain("startup_verification.passed");
   });
 });

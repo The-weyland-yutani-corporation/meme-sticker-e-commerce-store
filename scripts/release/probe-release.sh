@@ -6,8 +6,7 @@ app_url="${1:?usage: probe-release.sh <app-url>}"
 app_url="${app_url%/}"
 health_response="$(mktemp)"
 home_response="$(mktemp)"
-synthetic_response="$(mktemp)"
-trap 'rm -f "$health_response" "$home_response" "$synthetic_response"' EXIT
+trap 'rm -f "$health_response" "$home_response"' EXIT
 
 probe_url() {
   local url="$1"
@@ -42,18 +41,4 @@ jq -e '
 probe_url "${app_url}/" "$home_response"
 grep -Eiq '<(html|body)([[:space:]>])' "$home_response"
 
-curl \
-  --fail \
-  --silent \
-  --show-error \
-  --request POST \
-  --header "authorization: Bearer ${SYNTHETIC_PROBE_TOKEN}" \
-  --max-time 30 \
-  "${app_url}/api/internal/synthetic-order" >"$synthetic_response"
-jq -e '
-  .status == "ok" and
-  .deleted == true and
-  (.amountTotal | type == "number" and . > 0)
-' "$synthetic_response" >/dev/null
-
-echo "Health, storefront, database, and synthetic-order probes passed for $app_url."
+echo "Health, storefront, and database probes passed for $app_url."

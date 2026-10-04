@@ -76,66 +76,64 @@ if (-not $costReaderRole) {
     --output none
 }
 
-$postgresPassword = $null
-$probeToken = $null
-$existingAppName = az webapp list `
+$existingKeyVault = az keyvault list `
   --resource-group $ResourceGroup `
-  --query "[?starts_with(name, '$NamePrefix-app-')].name | [0]" `
+  --query "[?starts_with(name, '$NamePrefix-kv-')].name | [0]" `
   --output tsv
 
-if ($existingAppName) {
-  $existingSettings = az webapp config appsettings list `
+if ($existingKeyVault) {
+  az deployment group what-if `
     --resource-group $ResourceGroup `
-    --name $existingAppName | ConvertFrom-Json
-  $existingDatabaseUrl = $existingSettings |
-    Where-Object { $_.name -eq "DATABASE_URL" } |
-    Select-Object -ExpandProperty value -First 1
-  $existingProbeToken = $existingSettings |
-    Where-Object { $_.name -eq "SYNTHETIC_PROBE_TOKEN" } |
-    Select-Object -ExpandProperty value -First 1
+    --name main `
+    --template-file "infra/reconcile.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      releaseSha=bootstrap `
+    --no-pretty-print | Out-Null
 
-  if ($existingDatabaseUrl -and $existingDatabaseUrl.StartsWith("postgresql://")) {
-    $databaseUri = [Uri]$existingDatabaseUrl
-    $databaseUserInfo = $databaseUri.UserInfo.Split(":", 2)
-    if ($databaseUserInfo.Count -eq 2) {
-      $postgresPassword = [Uri]::UnescapeDataString($databaseUserInfo[1])
-    }
-  }
-  if ($existingProbeToken -and -not $existingProbeToken.StartsWith("@Microsoft.KeyVault(")) {
-    $probeToken = $existingProbeToken
-  }
+  az deployment group create `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/reconcile.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      releaseSha=bootstrap `
+    --output none
 }
-
-if (-not $postgresPassword) {
+else {
   $postgresPassword = "Aa1-$(New-RandomHex 30)"
-}
-if (-not $probeToken) {
   $probeToken = New-RandomHex 32
+
+  az deployment group what-if `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/main.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      postgresAdminPassword=$postgresPassword `
+      syntheticProbeToken=$probeToken `
+      releaseSha=bootstrap `
+    --no-pretty-print | Out-Null
+
+  az deployment group create `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/main.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      postgresAdminPassword=$postgresPassword `
+      syntheticProbeToken=$probeToken `
+      releaseSha=bootstrap `
+    --output none
 }
-
-az deployment group what-if `
-  --resource-group $ResourceGroup `
-  --template-file "infra/main.bicep" `
-  --parameters `
-    location=$Location `
-    namePrefix=$NamePrefix `
-    deploymentPrincipalObjectId=$($identity.principalId) `
-    postgresAdminPassword=$postgresPassword `
-    syntheticProbeToken=$probeToken `
-    releaseSha=bootstrap `
-  --no-pretty-print | Out-Null
-
-az deployment group create `
-  --resource-group $ResourceGroup `
-  --template-file "infra/main.bicep" `
-  --parameters `
-    location=$Location `
-    namePrefix=$NamePrefix `
-    deploymentPrincipalObjectId=$($identity.principalId) `
-    postgresAdminPassword=$postgresPassword `
-    syntheticProbeToken=$probeToken `
-    releaseSha=bootstrap `
-  --output none
 
 $subscription = az account show | ConvertFrom-Json
 $outputs = az deployment group show `

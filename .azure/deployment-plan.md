@@ -58,7 +58,7 @@ Generated: 2026-10-04T13:16:56Z
 | Application Insights | APM and request/dependency telemetry |
 | Virtual Network | App Service regional integration and private endpoint subnets |
 | Private DNS | Private resolution for PostgreSQL, Key Vault, and Blob Storage |
-| Key Vault | Recovery copies of database URL, administrator password, and synthetic probe token |
+| Key Vault | Authoritative database URL, administrator password, and synthetic probe token |
 | Managed identities | GitHub OIDC deployment and App Service Key Vault access |
 | Azure Monitor | Availability test, 5xx alert, PostgreSQL storage alert |
 | Cost Management budget | $75 monthly production budget signal |
@@ -67,7 +67,7 @@ Generated: 2026-10-04T13:16:56Z
 
 - **Status:** Verified
 - **GitHub OIDC identity:** Contributor on only `rg-meme-forge-production` for resource reconciliation; Storage Blob Data Contributor remains scoped to the release storage account from the original design but the release controller no longer uses the Blob data plane; Cost Management Reader at subscription scope for production spend signals.
-- **App Service system identity:** Key Vault `get` access remains available for recovery, while runtime database and probe values are encrypted App Service settings.
+- **App Service system identity:** Key Vault `get` access resolves runtime database and probe references over the private endpoint.
 - **Bootstrap operator:** Existing inherited Owner access covers resource creation and scoped role assignment.
 - **Long-lived credentials:** None. No client secret, publish profile, storage key, database secret, or reusable cloud token is stored in GitHub.
 

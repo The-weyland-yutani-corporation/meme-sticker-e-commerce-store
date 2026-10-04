@@ -17,6 +17,7 @@ cp -R public "$package_dir/public"
 cp -R prisma "$package_dir/prisma"
 cp package.json package-lock.json "$package_dir/"
 cp scripts/release/start-production.sh "$package_dir/start-production.sh"
+cp scripts/release/verify-startup.mjs "$package_dir/verify-startup.mjs"
 
 npm ci \
   --omit=dev \
@@ -42,5 +43,6 @@ test -d "$package_dir/.next/static"
 test -d "$package_dir/prisma/migrations"
 test -f "$package_dir/node_modules/prisma/build/index.js"
 test -x "$package_dir/start-production.sh"
+test -f "$package_dir/verify-startup.mjs"
 
 printf '%s\n' "$archive"

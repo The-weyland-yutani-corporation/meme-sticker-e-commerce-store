@@ -102,8 +102,8 @@ GitHub, or reusable cloud token.
 - Linux App Service Basic plan and production Web App;
 - PostgreSQL Flexible Server burstable compute, 32 GiB storage, TLS, and
   seven-day backups;
-- encrypted App Service settings for runtime database and probe values, with
-  retained Key Vault copies for recovery;
+- Key Vault references for runtime database and probe values, resolved by the
+  VNet-integrated App Service over the private endpoint;
 - private release-package blob container with versioning and soft deletion;
 - policy-compatible disabled public access for PostgreSQL, Key Vault, and Blob
   Storage;
@@ -123,8 +123,8 @@ successful GitHub production Deployments.
 For an undeployed SHA, the controller:
 
 1. signs in to Azure through GitHub OIDC;
-2. reads PostgreSQL and synthetic-probe values through the App Service
-   management plane;
+2. lets Azure Resource Manager resolve existing Key Vault secrets directly into
+   secure Bicep module parameters without exposing them to the runner;
 3. validates and applies Bicep;
 4. builds one Next.js standalone package stamped with the exact SHA;
 5. retains the immutable package as a GitHub Actions artifact;
@@ -132,8 +132,9 @@ For an undeployed SHA, the controller:
 7. configures `prisma migrate deploy` to run from the App Service startup
    command inside the private network;
 8. deploys the package directly to the production App Service;
-9. verifies `/api/health`, storefront HTML, database readiness, and a tagged
-   synthetic order that is created, read, deleted, and rechecked; and
+9. verifies `/api/health`, storefront HTML, and database readiness after App
+   Service startup has created, read, deleted, and rechecked a tagged synthetic
+   order internally; and
 10. records the package, SHA, previous package, Azure URL, run, probes, and
     outcome in GitHub Deployments and retained JSON evidence.
 
@@ -155,9 +156,9 @@ from the server catalog, and order/items are written transactionally.
 Stripe is not active in this stage. Legacy Stripe database fields remain only
 to keep the migration additive. The old webhook returns `410 Gone`.
 
-The synthetic probe uses an encrypted App Service setting retained in Key
-Vault, contains no customer PII, reuses the real order service, and deletes its
-tagged order after verification.
+The synthetic probe uses a Key Vault-backed bearer token, runs from the App
+Service startup path inside the private network, contains no customer PII,
+reuses the real order service, and deletes its tagged order after verification.
 
 ## Production signals
 

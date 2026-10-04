@@ -247,11 +247,11 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'DATABASE_URL'
-          value: databaseUrl
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=database-url)'
         }
         {
           name: 'SYNTHETIC_PROBE_TOKEN'
-          value: syntheticProbeToken
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=synthetic-probe-token)'
         }
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

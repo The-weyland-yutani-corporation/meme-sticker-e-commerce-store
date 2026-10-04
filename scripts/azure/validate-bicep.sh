@@ -2,6 +2,7 @@
 set -euo pipefail
 
 az bicep build --file infra/main.bicep --stdout >/dev/null
+az bicep build --file infra/reconcile.bicep --stdout >/dev/null
 az bicep build --file infra/preflight.bicep --stdout >/dev/null
 
 if grep -RInE \

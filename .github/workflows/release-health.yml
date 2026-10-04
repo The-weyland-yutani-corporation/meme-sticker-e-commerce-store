@@ -158,36 +158,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Read production settings
-        shell: bash
-        run: |
-          set -euo pipefail
-          app_settings="$(
-            az webapp config appsettings list \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$AZURE_APP_NAME"
-          )"
-          database_url="$(
-            jq -r '.[] | select(.name == "DATABASE_URL") | .value' \
-              <<<"$app_settings"
-          )"
-          probe_token="$(
-            jq -r '.[] | select(.name == "SYNTHETIC_PROBE_TOKEN") | .value' \
-              <<<"$app_settings"
-          )"
-          postgres_password="$(
-            DATABASE_URL="$database_url" node -e \
-              'process.stdout.write(decodeURIComponent(new URL(process.env.DATABASE_URL).password))'
-          )"
-          echo "::add-mask::$database_url"
-          echo "::add-mask::$postgres_password"
-          echo "::add-mask::$probe_token"
-          {
-            echo "DATABASE_URL=$database_url"
-            echo "POSTGRES_ADMIN_PASSWORD=$postgres_password"
-            echo "SYNTHETIC_PROBE_TOKEN=$probe_token"
-          } >>"$GITHUB_ENV"
-
       - name: Validate production configuration
         run: scripts/release/validate-config.sh production
 
@@ -202,24 +172,22 @@ jobs:
           scripts/azure/validate-bicep.sh
           az deployment group what-if \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
+            --name main \
+            --template-file infra/reconcile.bicep \
             --parameters \
               location="$AZURE_LOCATION" \
               namePrefix="$AZURE_NAME_PREFIX" \
               deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
-              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
-              syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
               releaseSha="$infrastructure_release_sha" \
             --no-pretty-print >/dev/null
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
+            --name main \
+            --template-file infra/reconcile.bicep \
             --parameters \
               location="$AZURE_LOCATION" \
               namePrefix="$AZURE_NAME_PREFIX" \
               deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
-              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
-              syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
               releaseSha="$infrastructure_release_sha" \
             --output none
 
@@ -449,11 +417,6 @@ jobs:
     environment: production
     env:
       APP_URL: ${{ vars.APP_URL }}
-      AZURE_APP_NAME: ${{ vars.AZURE_APP_NAME }}
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       EXPECTED_RELEASE_SHA: ${{ needs.plan.outputs.target_sha }}
       TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
     steps:
@@ -462,46 +425,6 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.target_sha }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Sign in to Azure with OIDC
-        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Read probe configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          app_settings="$(
-            az webapp config appsettings list \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --name "$AZURE_APP_NAME"
-          )"
-          database_url="$(
-            jq -r '.[] | select(.name == "DATABASE_URL") | .value' \
-              <<<"$app_settings"
-          )"
-          probe_token="$(
-            jq -r '.[] | select(.name == "SYNTHETIC_PROBE_TOKEN") | .value' \
-              <<<"$app_settings"
-          )"
-          echo "::add-mask::$database_url"
-          echo "::add-mask::$probe_token"
-          {
-            echo "DATABASE_URL=$database_url"
-            echo "SYNTHETIC_PROBE_TOKEN=$probe_token"
-          } >>"$GITHUB_ENV"
-
       - name: Run scheduled production probes
         run: scripts/release/probe-release.sh "$APP_URL"
 
@@ -509,7 +432,7 @@ jobs:
         if: failure()
         env:
           RELEASE_PHASE: azure-production-monitor
-        run: scripts/release/incident.sh report "Scheduled Azure production health or synthetic-order probes failed."
+        run: scripts/release/incident.sh report "Scheduled Azure production health, storefront, or database probes failed."
 
       - name: Resolve recovered release incident
         if: success()
