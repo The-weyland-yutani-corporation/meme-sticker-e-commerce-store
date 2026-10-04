@@ -151,6 +151,8 @@ Generated: 2026-10-04T13:16:56Z
 | Private DNS verification | `az network private-dns record-set a list ...` | ✅ PostgreSQL, Key Vault, and Blob names resolve to `10.20.2.x` | 2026-10-04T14:59:00Z |
 | Application package smoke test | `RELEASE_SHA=$(git rev-parse HEAD) scripts/release/package-app.sh` | ✅ Standalone server, Prisma CLI, migrations, and executable startup script packaged | 2026-10-04T14:49:00Z |
 | Updated tests | `npm test -- --maxWorkers=2` | ✅ 8 files, 33 tests passed, including GitHub OIDC issuer/audience/repository/subject/signature validation | 2026-10-04T17:35:00Z |
+| Repository OIDC customization | `gh api repos/The-weyland-yutani-corporation/meme-sticker-e-commerce-store/actions/oidc/customization/sub` | ✅ GitHub reports `use_immutable_subject: true` and `sub_claim_prefix: repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955` | 2026-10-04T18:51:00Z |
+| Live GitHub OIDC assertion | `gh run view 37223574750 --log-failed` | ✅ Azure Login logged the presented subject as `repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production`; the run failed because Azure still trusted the legacy subject | 2026-10-04T18:51:00Z |
 | Stable GitHub federation | `az identity federated-credential show ...` | ✅ Subject reconciled to `owner@id/repository@id:environment:production`, matching the live GitHub claim | 2026-10-04T18:24:00Z |
 
 **Validated by:** azure-validate skill workflow
