@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Retained only for break-glass rollback to a public PostgreSQL network model.
 : "${AZURE_APP_NAME:?AZURE_APP_NAME is required}"
 : "${AZURE_POSTGRES_NAME:?AZURE_POSTGRES_NAME is required}"
 : "${AZURE_RESOURCE_GROUP:?AZURE_RESOURCE_GROUP is required}"

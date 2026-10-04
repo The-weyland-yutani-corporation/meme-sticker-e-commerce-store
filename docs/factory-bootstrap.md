@@ -78,9 +78,8 @@ The script:
 - creates `rg-meme-forge-production` in Central US;
 - creates a user-assigned Azure identity and GitHub OIDC federation scoped to
   the repository's `production` environment;
-- grants the identity Contributor on the dedicated resource group, Storage Blob
-  Data Contributor on the release-package account, and Cost Management Reader
-  on the subscription;
+- grants the identity Contributor on the dedicated resource group and Cost
+  Management Reader on the subscription;
 - deploys `infra/main.bicep`;
 - creates PostgreSQL and synthetic-probe secrets in Key Vault;
 - creates a VNet, App Service integration subnet, private endpoint subnet,
@@ -159,6 +158,9 @@ to keep the migration additive. The old webhook returns `410 Gone`.
 The synthetic probe uses a Key Vault-backed bearer token, runs from the App
 Service startup path inside the private network, contains no customer PII,
 reuses the real order service, and deletes its tagged order after verification.
+The scheduled controller also presents a short-lived GitHub Actions OIDC token
+whose signature, issuer, audience, repository, and production-environment
+subject are validated before each continuous synthetic order.
 
 ## Production signals
 

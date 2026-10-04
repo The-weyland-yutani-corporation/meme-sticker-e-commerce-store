@@ -104,6 +104,7 @@ describe("factory infrastructure authority", () => {
       "postgres flexible-server firewall-rule create",
     );
     expect(releaseWorkflow).not.toContain("npm run db:migrate");
+    expect(bootstrap).not.toContain("Storage Blob Data Contributor");
   });
 
   it("packages Prisma and runs migrations inside App Service", () => {

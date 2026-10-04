@@ -141,24 +141,6 @@ $outputs = az deployment group show `
   --name main `
   --query properties.outputs | ConvertFrom-Json
 
-$storageId = az storage account show `
-  --resource-group $ResourceGroup `
-  --name $outputs.storageAccountName.value `
-  --query id --output tsv
-$blobContributorRole = az role assignment list `
-  --assignee-object-id $identity.principalId `
-  --scope $storageId `
-  --role "Storage Blob Data Contributor" `
-  --query "[0].id" --output tsv
-if (-not $blobContributorRole) {
-  az role assignment create `
-    --assignee-object-id $identity.principalId `
-    --assignee-principal-type ServicePrincipal `
-    --scope $storageId `
-    --role "Storage Blob Data Contributor" `
-    --output none
-}
-
 $env:AZURE_APP_NAME = $outputs.appName.value
 $env:AZURE_POSTGRES_NAME = $outputs.postgresName.value
 $env:AZURE_RESOURCE_GROUP = $ResourceGroup

@@ -66,7 +66,7 @@ Generated: 2026-10-04T13:16:56Z
 ### Role Assignment Verification
 
 - **Status:** Verified
-- **GitHub OIDC identity:** Contributor on only `rg-meme-forge-production` for resource reconciliation; Storage Blob Data Contributor remains scoped to the release storage account from the original design but the release controller no longer uses the Blob data plane; Cost Management Reader at subscription scope for production spend signals.
+- **GitHub OIDC identity:** Contributor on only `rg-meme-forge-production` for resource reconciliation and Cost Management Reader at subscription scope for production spend signals. New bootstraps do not assign Blob data-plane access.
 - **App Service system identity:** Key Vault `get` access resolves runtime database and probe references over the private endpoint.
 - **Bootstrap operator:** Existing inherited Owner access covers resource creation and scoped role assignment.
 - **Long-lived credentials:** None. No client secret, publish profile, storage key, database secret, or reusable cloud token is stored in GitHub.
@@ -86,7 +86,7 @@ Generated: 2026-10-04T13:16:56Z
 | Microsoft.Insights/metricAlerts | 2 | 2 | Provider validation passed | Provider registered and what-if passed |
 | Microsoft.Insights/actionGroups | 1 | 1 | Provider validation passed | Provider registered and what-if passed |
 | Microsoft.ManagedIdentity/userAssignedIdentities | 1 | 1 | Provider validation passed | Provider registered and what-if passed |
-| Microsoft.Authorization/roleAssignments | 3 | Existing usage + 3 | Inherited Owner access confirmed | Contributor, Storage Blob Data Contributor, Cost Management Reader |
+| Microsoft.Authorization/roleAssignments | 2 | Existing usage + 2 | Inherited Owner access confirmed | Contributor and Cost Management Reader |
 | Microsoft.Consumption/budgets | 1 | 1 | Budget API readable | Existing production budget absent |
 
 **Status:** ✅ All resources are within limits. App Service B1 and Storage quotas have ample capacity; PostgreSQL uses the supported capability API fallback because Microsoft.Quota returns no rows for that provider.
@@ -150,7 +150,7 @@ Generated: 2026-10-04T13:16:56Z
 | Private endpoint verification | `az network private-endpoint list -g rg-meme-forge-production` | ✅ Three connections approved | 2026-10-04T14:57:00Z |
 | Private DNS verification | `az network private-dns record-set a list ...` | ✅ PostgreSQL, Key Vault, and Blob names resolve to `10.20.2.x` | 2026-10-04T14:59:00Z |
 | Application package smoke test | `RELEASE_SHA=$(git rev-parse HEAD) scripts/release/package-app.sh` | ✅ Standalone server, Prisma CLI, migrations, and executable startup script packaged | 2026-10-04T14:49:00Z |
-| Updated tests | `npm test -- --maxWorkers=2` | ✅ 7 files, 28 tests passed | 2026-10-04T14:58:00Z |
+| Updated tests | `npm test -- --maxWorkers=2` | ✅ 8 files, 33 tests passed, including GitHub OIDC issuer/audience/repository/subject/signature validation | 2026-10-04T17:35:00Z |
 
 **Validated by:** azure-validate skill workflow
 
