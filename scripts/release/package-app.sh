@@ -15,6 +15,18 @@ cp -R .next/standalone/. "$package_dir/"
 cp -R .next/static "$package_dir/.next/static"
 cp -R public "$package_dir/public"
 cp -R prisma "$package_dir/prisma"
+cp package.json package-lock.json "$package_dir/"
+cp scripts/release/start-production.sh "$package_dir/start-production.sh"
+cp scripts/release/verify-startup.mjs "$package_dir/verify-startup.mjs"
+
+npm ci \
+  --omit=dev \
+  --ignore-scripts \
+  --prefix "$package_dir" \
+  --no-audit \
+  --no-fund
+cp -R node_modules/.prisma "$package_dir/node_modules/.prisma"
+chmod +x "$package_dir/start-production.sh"
 
 if command -v zip >/dev/null 2>&1; then
   (
@@ -29,5 +41,8 @@ test -s "$archive"
 test -f "$package_dir/server.js"
 test -d "$package_dir/.next/static"
 test -d "$package_dir/prisma/migrations"
+test -f "$package_dir/node_modules/prisma/build/index.js"
+test -x "$package_dir/start-production.sh"
+test -f "$package_dir/verify-startup.mjs"
 
 printf '%s\n' "$archive"

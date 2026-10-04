@@ -78,9 +78,27 @@ Invoke-Check "azure-account" {
 
 $script:principalObjectId = $null
 Invoke-Check "azure-principal" {
-  $script:principalObjectId = (& az ad signed-in-user show --query id --output tsv --only-show-errors 2>&1 | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $script:principalObjectId) {
-    throw "Could not resolve the signed-in Azure principal object ID."
+  $tokenResult = Invoke-JsonCommand "az" @(
+    "account", "get-access-token",
+    "--resource", "https://management.azure.com/",
+    "--only-show-errors",
+    "--output", "json"
+  )
+  $tokenParts = $tokenResult.accessToken.Split(".")
+  if ($tokenParts.Count -lt 2) {
+    throw "Azure access token did not contain a JWT payload."
+  }
+  $payload = $tokenParts[1].Replace("-", "+").Replace("_", "/")
+  switch ($payload.Length % 4) {
+    2 { $payload += "==" }
+    3 { $payload += "=" }
+  }
+  $claims = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String($payload)
+  ) | ConvertFrom-Json
+  $script:principalObjectId = $claims.oid
+  if (-not $script:principalObjectId) {
+    throw "Azure access token did not include the signed-in principal object ID."
   }
   Add-Check "azure-principal" "ready" "Signed-in principal object ID resolved."
 }
@@ -90,6 +108,7 @@ Invoke-Check "azure-permissions" {
       "role", "assignment", "list",
       "--include-inherited",
       "--all",
+      "--fill-principal-name", "false",
       "--only-show-errors",
       "--output", "json"
     ))
