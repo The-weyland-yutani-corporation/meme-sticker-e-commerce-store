@@ -42,14 +42,25 @@ jq -e '
 probe_url "${app_url}/" "$home_response"
 grep -Eiq '<(html|body)([[:space:]>])' "$home_response"
 
-DATABASE_URL="$DATABASE_URL" npx prisma migrate status
+: "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:?GitHub OIDC request token is required}"
+: "${ACTIONS_ID_TOKEN_REQUEST_URL:?GitHub OIDC request URL is required}"
+oidc_token="$(
+  curl \
+    --fail \
+    --silent \
+    --show-error \
+    --header "authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+    "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=meme-forge-synthetic-order" |
+    jq -er '.value'
+)"
+echo "::add-mask::$oidc_token"
 
 curl \
   --fail \
   --silent \
   --show-error \
   --request POST \
-  --header "authorization: Bearer ${SYNTHETIC_PROBE_TOKEN}" \
+  --header "authorization: Bearer ${oidc_token}" \
   --max-time 30 \
   "${app_url}/api/internal/synthetic-order" >"$synthetic_response"
 jq -e '

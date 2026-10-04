@@ -18,8 +18,6 @@ required_variables=(
   AZURE_STORAGE_ACCOUNT
   AZURE_SUBSCRIPTION_ID
   AZURE_TENANT_ID
-  DATABASE_URL
-  SYNTHETIC_PROBE_TOKEN
 )
 
 missing=()
@@ -37,11 +35,6 @@ fi
 
 if [[ "$APP_URL" != https://* ]]; then
   echo "APP_URL must use HTTPS." >&2
-  exit 1
-fi
-
-if [[ "$DATABASE_URL" != postgres://* && "$DATABASE_URL" != postgresql://* ]]; then
-  echo "DATABASE_URL must be a PostgreSQL connection URL." >&2
   exit 1
 fi
 

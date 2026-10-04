@@ -6,6 +6,7 @@ on:
     - cron: "*/15 * * * *"
 
 permissions:
+  actions: read
   contents: read
   deployments: write
   id-token: write
@@ -27,6 +28,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       previous_blob: ${{ steps.reconcile.outputs.previous_blob }}
+      previous_run_id: ${{ steps.reconcile.outputs.previous_run_id }}
       previous_sha: ${{ steps.reconcile.outputs.previous_sha }}
       release_required: ${{ steps.reconcile.outputs.release_required }}
       target_sha: ${{ steps.reconcile.outputs.target_sha }}
@@ -75,6 +77,7 @@ jobs:
             echo "release_required=$([ "$target_is_live" = true ] && echo false || echo true)"
             echo "previous_sha=$(jq -r '.sha // empty' <<<"$previous")"
             echo "previous_blob=$(jq -r '.payload.package_blob // empty' <<<"$previous")"
+            echo "previous_run_id=$(jq -r '.payload.package_run_id // empty' <<<"$previous")"
           } >>"$GITHUB_OUTPUT"
 
   release:
@@ -155,40 +158,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Read production secrets
-        shell: bash
-        run: |
-          set -euo pipefail
-          database_url="$(
-            az keyvault secret show \
-              --vault-name "$AZURE_KEY_VAULT_NAME" \
-              --name database-url \
-              --query value \
-              --output tsv
-          )"
-          postgres_password="$(
-            az keyvault secret show \
-              --vault-name "$AZURE_KEY_VAULT_NAME" \
-              --name postgres-admin-password \
-              --query value \
-              --output tsv
-          )"
-          probe_token="$(
-            az keyvault secret show \
-              --vault-name "$AZURE_KEY_VAULT_NAME" \
-              --name synthetic-probe-token \
-              --query value \
-              --output tsv
-          )"
-          echo "::add-mask::$database_url"
-          echo "::add-mask::$postgres_password"
-          echo "::add-mask::$probe_token"
-          {
-            echo "DATABASE_URL=$database_url"
-            echo "POSTGRES_ADMIN_PASSWORD=$postgres_password"
-            echo "SYNTHETIC_PROBE_TOKEN=$probe_token"
-          } >>"$GITHUB_ENV"
-
       - name: Validate production configuration
         run: scripts/release/validate-config.sh production
 
@@ -203,29 +172,24 @@ jobs:
           scripts/azure/validate-bicep.sh
           az deployment group what-if \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
-            --parameters infra/main.bicepparam \
+            --name main \
+            --template-file infra/reconcile.bicep \
             --parameters \
               location="$AZURE_LOCATION" \
               namePrefix="$AZURE_NAME_PREFIX" \
               deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
-              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
-              syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
               releaseSha="$infrastructure_release_sha" \
             --no-pretty-print >/dev/null
           az deployment group create \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
-            --parameters infra/main.bicepparam \
+            --name main \
+            --template-file infra/reconcile.bicep \
             --parameters \
               location="$AZURE_LOCATION" \
               namePrefix="$AZURE_NAME_PREFIX" \
               deploymentPrincipalObjectId="$AZURE_PRINCIPAL_OBJECT_ID" \
-              postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
-              syntheticProbeToken="$SYNTHETIC_PROBE_TOKEN" \
               releaseSha="$infrastructure_release_sha" \
             --output none
-          scripts/azure/configure-postgres-firewall.sh
 
       - name: Build immutable application package
         id: package
@@ -233,34 +197,23 @@ jobs:
         run: |
           set -euo pipefail
           archive="$(scripts/release/package-app.sh | tail -n 1)"
-          blob_name="${TARGET_SHA}.zip"
-          package_exists="$(
-            az storage blob exists \
-              --account-name "$AZURE_STORAGE_ACCOUNT" \
-              --auth-mode login \
-              --container-name "$AZURE_RELEASE_CONTAINER" \
-              --name "$blob_name" \
-              --query exists \
-              --output tsv
-          )"
-          if [ "$package_exists" != true ]; then
-            az storage blob upload \
-              --account-name "$AZURE_STORAGE_ACCOUNT" \
-              --auth-mode login \
-              --container-name "$AZURE_RELEASE_CONTAINER" \
-              --name "$blob_name" \
-              --file "$archive" \
-              --overwrite false \
-              --only-show-errors
-          fi
+          package_name="production-package-${TARGET_SHA}"
           echo "archive=$archive" >>"$GITHUB_OUTPUT"
-          echo "blob_name=$blob_name" >>"$GITHUB_OUTPUT"
+          echo "package_name=$package_name" >>"$GITHUB_OUTPUT"
+
+      - name: Retain immutable application package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.package_name }}
+          path: ${{ steps.package.outputs.archive }}
+          retention-days: 90
+          compression-level: 0
 
       - name: Create GitHub production deployment
         id: deployment
         shell: bash
         env:
-          PACKAGE_BLOB: ${{ steps.package.outputs.blob_name }}
+          PACKAGE_BLOB: ${{ steps.package.outputs.package_name }}
           PREVIOUS_BLOB: ${{ needs.plan.outputs.previous_blob }}
           PREVIOUS_SHA: ${{ needs.plan.outputs.previous_sha }}
         run: |
@@ -271,6 +224,7 @@ jobs:
               --arg package_blob "$PACKAGE_BLOB" \
               --arg previous_blob "$PREVIOUS_BLOB" \
               --arg previous_sha "$PREVIOUS_SHA" \
+              --arg package_run_id "$GITHUB_RUN_ID" \
               --arg run_url "$RUN_URL" \
               '{
                 ref:$ref,
@@ -278,6 +232,7 @@ jobs:
                 description:"Autonomous Azure production release",
                 payload:{
                   package_blob:$package_blob,
+                  package_run_id:$package_run_id,
                   previous_blob:$previous_blob,
                   previous_sha:$previous_sha,
                   run_url:$run_url
@@ -302,38 +257,8 @@ jobs:
             -f environment_url="$APP_URL" \
             -f description="Azure migration and deployment started" >/dev/null
 
-      - name: Open temporary migration firewall rule
-        id: firewall
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_ip="$(curl --fail --silent --show-error https://api.ipify.org)"
-          rule_name="github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          az postgres flexible-server firewall-rule create \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$AZURE_POSTGRES_NAME" \
-            --rule-name "$rule_name" \
-            --start-ip-address "$runner_ip" \
-            --end-ip-address "$runner_ip" \
-            --output none
-          echo "rule_name=$rule_name" >>"$GITHUB_OUTPUT"
-
       - name: Enforce additive migrations
         run: scripts/release/check-migrations.sh "${{ needs.plan.outputs.previous_sha }}" "$TARGET_SHA"
-
-      - name: Apply production migrations
-        run: npm run db:migrate
-
-      - name: Close temporary migration firewall rule
-        if: always() && steps.firewall.outputs.rule_name != ''
-        shell: bash
-        run: |
-          az postgres flexible-server firewall-rule delete \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --name "$AZURE_POSTGRES_NAME" \
-            --rule-name "${{ steps.firewall.outputs.rule_name }}" \
-            --yes \
-            --output none
 
       - name: Deploy exact package to App Service
         id: deploy
@@ -365,20 +290,28 @@ jobs:
         shell: bash
         env:
           PREVIOUS_BLOB: ${{ needs.plan.outputs.previous_blob }}
+          PREVIOUS_RUN_ID: ${{ needs.plan.outputs.previous_run_id }}
           PREVIOUS_SHA: ${{ needs.plan.outputs.previous_sha }}
         run: |
           set -euo pipefail
-          if [ -z "$PREVIOUS_BLOB" ] || [ -z "$PREVIOUS_SHA" ]; then
+          if [ -z "$PREVIOUS_BLOB" ] ||
+            [ -z "$PREVIOUS_RUN_ID" ] ||
+            [ -z "$PREVIOUS_SHA" ]; then
             echo "::error::No previous successful package is available for rollback."
             exit 1
           fi
-          az storage blob download \
-            --account-name "$AZURE_STORAGE_ACCOUNT" \
-            --auth-mode login \
-            --container-name "$AZURE_RELEASE_CONTAINER" \
+          mkdir -p previous-package
+          gh run download "$PREVIOUS_RUN_ID" \
+            --repo "$REPOSITORY" \
             --name "$PREVIOUS_BLOB" \
-            --file previous.zip \
-            --only-show-errors
+            --dir previous-package
+          previous_archive="$(
+            find previous-package -type f -name '*.zip' -print -quit
+          )"
+          [ -n "$previous_archive" ] || {
+            echo "::error::Previous release artifact did not contain a zip package."
+            exit 1
+          }
           az webapp config appsettings set \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_APP_NAME" \
@@ -387,7 +320,7 @@ jobs:
           az webapp deploy \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --name "$AZURE_APP_NAME" \
-            --src-path previous.zip \
+            --src-path "$previous_archive" \
             --type zip \
             --clean true \
             --restart true \
@@ -426,7 +359,7 @@ jobs:
         env:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
           JOB_STATUS: ${{ job.status }}
-          PACKAGE_BLOB: ${{ steps.package.outputs.blob_name }}
+          PACKAGE_BLOB: ${{ steps.package.outputs.package_name }}
           PREVIOUS_BLOB: ${{ needs.plan.outputs.previous_blob }}
           PREVIOUS_SHA: ${{ needs.plan.outputs.previous_sha }}
           ROLLBACK_VERIFIED: ${{ steps.rollback.outputs.verified }}
@@ -484,10 +417,6 @@ jobs:
     environment: production
     env:
       APP_URL: ${{ vars.APP_URL }}
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-      AZURE_KEY_VAULT_NAME: ${{ vars.AZURE_KEY_VAULT_NAME }}
-      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       EXPECTED_RELEASE_SHA: ${{ needs.plan.outputs.target_sha }}
       TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
     steps:
@@ -496,35 +425,6 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.target_sha }}
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Sign in to Azure with OIDC
-        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Read probe configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          database_url="$(az keyvault secret show --vault-name "$AZURE_KEY_VAULT_NAME" --name database-url --query value --output tsv)"
-          probe_token="$(az keyvault secret show --vault-name "$AZURE_KEY_VAULT_NAME" --name synthetic-probe-token --query value --output tsv)"
-          echo "::add-mask::$database_url"
-          echo "::add-mask::$probe_token"
-          {
-            echo "DATABASE_URL=$database_url"
-            echo "SYNTHETIC_PROBE_TOKEN=$probe_token"
-          } >>"$GITHUB_ENV"
-
       - name: Run scheduled production probes
         run: scripts/release/probe-release.sh "$APP_URL"
 
@@ -532,7 +432,7 @@ jobs:
         if: failure()
         env:
           RELEASE_PHASE: azure-production-monitor
-        run: scripts/release/incident.sh report "Scheduled Azure production health or synthetic-order probes failed."
+        run: scripts/release/incident.sh report "Scheduled Azure production health, storefront, or database probes failed."
 
       - name: Resolve recovered release incident
         if: success()

@@ -78,12 +78,13 @@ The script:
 - creates `rg-meme-forge-production` in Central US;
 - creates a user-assigned Azure identity and GitHub OIDC federation scoped to
   the repository's `production` environment;
-- grants the identity Contributor on the dedicated resource group, Storage Blob
-  Data Contributor on the release-package account, and Cost Management Reader
-  on the subscription;
+- grants the identity Contributor on the dedicated resource group and Cost
+  Management Reader on the subscription;
 - deploys `infra/main.bicep`;
 - creates PostgreSQL and synthetic-probe secrets in Key Vault;
-- restricts PostgreSQL to current App Service outbound addresses;
+- creates a VNet, App Service integration subnet, private endpoint subnet,
+  private DNS zones, and approved private endpoints for PostgreSQL, Key Vault,
+  and Blob Storage;
 - creates the GitHub `production` environment with no reviewers;
 - writes non-secret Azure resource identifiers as environment variables; and
 - creates a $75 monthly Azure budget.
@@ -100,8 +101,11 @@ GitHub, or reusable cloud token.
 - Linux App Service Basic plan and production Web App;
 - PostgreSQL Flexible Server burstable compute, 32 GiB storage, TLS, and
   seven-day backups;
-- Key Vault and App Service Key Vault references;
+- Key Vault references for runtime database and probe values, resolved by the
+  VNet-integrated App Service over the private endpoint;
 - private release-package blob container with versioning and soft deletion;
+- policy-compatible disabled public access for PostgreSQL, Key Vault, and Blob
+  Storage;
 - Log Analytics and workspace-based Application Insights;
 - availability test, App Service HTTP 5xx alert, PostgreSQL storage alert, and
   action group.
@@ -118,16 +122,18 @@ successful GitHub production Deployments.
 For an undeployed SHA, the controller:
 
 1. signs in to Azure through GitHub OIDC;
-2. reads PostgreSQL and synthetic-probe values from Key Vault;
+2. lets Azure Resource Manager resolve existing Key Vault secrets directly into
+   secure Bicep module parameters without exposing them to the runner;
 3. validates and applies Bicep;
 4. builds one Next.js standalone package stamped with the exact SHA;
-5. uploads the immutable package to Azure Storage;
-6. temporarily permits the GitHub runner IP for migration and removes the rule
-   in an `always()` cleanup step;
-7. rejects changed or destructive migrations and runs `prisma migrate deploy`;
-8. deploys directly to the production App Service;
-9. verifies `/api/health`, storefront HTML, migration state, and a tagged
-   synthetic order that is created, read, deleted, and rechecked; and
+5. retains the immutable package as a GitHub Actions artifact;
+6. rejects changed or destructive migrations;
+7. configures `prisma migrate deploy` to run from the App Service startup
+   command inside the private network;
+8. deploys the package directly to the production App Service;
+9. verifies `/api/health`, storefront HTML, and database readiness after App
+   Service startup has created, read, deleted, and rechecked a tagged synthetic
+   order internally; and
 10. records the package, SHA, previous package, Azure URL, run, probes, and
     outcome in GitHub Deployments and retained JSON evidence.
 
@@ -149,9 +155,12 @@ from the server catalog, and order/items are written transactionally.
 Stripe is not active in this stage. Legacy Stripe database fields remain only
 to keep the migration additive. The old webhook returns `410 Gone`.
 
-The synthetic probe uses a Key Vault-backed bearer token, contains no customer
-PII, reuses the real order service, and deletes its tagged order after
-verification.
+The synthetic probe uses a Key Vault-backed bearer token, runs from the App
+Service startup path inside the private network, contains no customer PII,
+reuses the real order service, and deletes its tagged order after verification.
+The scheduled controller also presents a short-lived GitHub Actions OIDC token
+whose signature, issuer, audience, repository, and production-environment
+subject are validated before each continuous synthetic order.
 
 ## Production signals
 
@@ -176,8 +185,8 @@ intent planner and auditor.
   separately.
 - Attempt to modify `infra/**` from the implementation lane.
 - Fail `/api/health` after deployment and verify previous-package redeployment.
-- Remove a Key Vault secret and verify the controller fails closed.
-- Fail PostgreSQL firewall cleanup and verify deployment does not proceed.
+- Remove a required App Service setting and verify the controller fails closed.
+- Break private DNS or App Service VNet integration and verify health fails.
 - Elevate 5xx, latency, database storage, and budget evidence and verify stable
   signal fingerprints.
 - Run the controllers with a healthy deployment and empty queue and verify no
