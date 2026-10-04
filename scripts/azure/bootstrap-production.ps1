@@ -28,8 +28,13 @@ $identity = az identity create `
   --name $IdentityName `
   --location $Location | ConvertFrom-Json
 
-$repositoryMetadata = gh api "repos/$Repository" | ConvertFrom-Json
-$subject = "repo:$($repositoryMetadata.owner.login)@$($repositoryMetadata.owner.id)/$($repositoryMetadata.name)@$($repositoryMetadata.id):environment:production"
+$oidcCustomization = gh api "repos/$Repository/actions/oidc/customization/sub" | ConvertFrom-Json
+if ($oidcCustomization.use_immutable_subject -and $oidcCustomization.sub_claim_prefix) {
+  $subject = "$($oidcCustomization.sub_claim_prefix):environment:production"
+}
+else {
+  $subject = "repo:$Repository`:environment:production"
+}
 $credentialName = "github-production"
 $existingCredential = az identity federated-credential list `
   --resource-group $ResourceGroup `

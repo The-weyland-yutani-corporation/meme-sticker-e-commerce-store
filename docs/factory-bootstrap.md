@@ -159,10 +159,12 @@ The synthetic probe uses a Key Vault-backed bearer token, runs from the App
 Service startup path inside the private network, contains no customer PII,
 reuses the real order service, and deletes its tagged order after verification.
 The scheduled controller also presents a short-lived GitHub Actions OIDC token
-whose signature, issuer, audience, repository, and production-environment
-subject are validated before each continuous synthetic order. Azure federation
-and probe validation both use GitHub's ID-stable
-`owner@id/repository@id:environment:production` subject form.
+whose signature, issuer, audience, repository name, immutable repository and
+owner IDs, and production-environment subject are validated before each
+continuous synthetic order. The bootstrap reads the repository's live OIDC
+configuration and reconciles Azure federation to the configured production
+subject. Probe validation accepts only that repository's configured immutable
+subject or GitHub's documented production-environment subject.
 
 ## Production signals
 

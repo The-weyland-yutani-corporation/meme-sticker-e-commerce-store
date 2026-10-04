@@ -8,8 +8,12 @@ const issuer = "https://token.actions.githubusercontent.com";
 const audience = "meme-forge-synthetic-order";
 const repository =
   "The-weyland-yutani-corporation/meme-sticker-e-commerce-store";
-const subject =
-  "repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production";
+const repositoryId = "1385623955";
+const repositoryOwnerId = "264313301";
+const productionSubjects = new Set([
+  `repo:${repository}:environment:production`,
+  "repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production",
+]);
 
 type JsonObject = Record<string, unknown>;
 
@@ -58,7 +62,10 @@ export function verifyGitHubActionsOidcToken(
       claims.iss !== issuer ||
       !hasAudience(claims.aud) ||
       claims.repository !== repository ||
-      claims.sub !== subject ||
+      claims.repository_id !== repositoryId ||
+      claims.repository_owner_id !== repositoryOwnerId ||
+      typeof claims.sub !== "string" ||
+      !productionSubjects.has(claims.sub) ||
       typeof claims.exp !== "number" ||
       typeof claims.nbf !== "number"
     ) {

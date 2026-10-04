@@ -23,6 +23,8 @@ function createToken(overrides: Record<string, unknown> = {}) {
       nbf: nowSeconds - 30,
       repository:
         "The-weyland-yutani-corporation/meme-sticker-e-commerce-store",
+      repository_id: "1385623955",
+      repository_owner_id: "264313301",
       sub: "repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production",
       ...overrides,
     }),
@@ -47,8 +49,22 @@ describe("GitHub Actions OIDC verification", () => {
     ).toBe(true);
   });
 
+  it("accepts GitHub's documented production-environment subject", () => {
+    expect(
+      verifyGitHubActionsOidcToken(
+        createToken({
+          sub: "repo:The-weyland-yutani-corporation/meme-sticker-e-commerce-store:environment:production",
+        }),
+        { keys: [publicJwk] },
+        now,
+      ),
+    ).toBe(true);
+  });
+
   it.each([
     ["repository", { repository: "attacker/repository" }],
+    ["repository ID", { repository_id: "999" }],
+    ["repository owner ID", { repository_owner_id: "999" }],
     ["environment subject", { sub: "repo:attacker/repository:environment:production" }],
     ["audience", { aud: "different-audience" }],
     ["expiry", { exp: nowSeconds - 1 }],
