@@ -160,7 +160,9 @@ Service startup path inside the private network, contains no customer PII,
 reuses the real order service, and deletes its tagged order after verification.
 The scheduled controller also presents a short-lived GitHub Actions OIDC token
 whose signature, issuer, audience, repository, and production-environment
-subject are validated before each continuous synthetic order.
+subject are validated before each continuous synthetic order. Azure federation
+and probe validation both use GitHub's ID-stable
+`owner@id/repository@id:environment:production` subject form.
 
 ## Production signals
 

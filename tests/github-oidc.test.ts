@@ -23,7 +23,7 @@ function createToken(overrides: Record<string, unknown> = {}) {
       nbf: nowSeconds - 30,
       repository:
         "The-weyland-yutani-corporation/meme-sticker-e-commerce-store",
-      sub: "repo:The-weyland-yutani-corporation/meme-sticker-e-commerce-store:environment:production",
+      sub: "repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production",
       ...overrides,
     }),
   ).toString("base64url");

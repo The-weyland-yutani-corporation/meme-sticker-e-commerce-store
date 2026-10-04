@@ -8,7 +8,8 @@ const issuer = "https://token.actions.githubusercontent.com";
 const audience = "meme-forge-synthetic-order";
 const repository =
   "The-weyland-yutani-corporation/meme-sticker-e-commerce-store";
-const subject = `repo:${repository}:environment:production`;
+const subject =
+  "repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production";
 
 type JsonObject = Record<string, unknown>;
 

@@ -28,7 +28,8 @@ $identity = az identity create `
   --name $IdentityName `
   --location $Location | ConvertFrom-Json
 
-$subject = "repo:${Repository}:environment:production"
+$repositoryMetadata = gh api "repos/$Repository" | ConvertFrom-Json
+$subject = "repo:$($repositoryMetadata.owner.login)@$($repositoryMetadata.owner.id)/$($repositoryMetadata.name)@$($repositoryMetadata.id):environment:production"
 $credentialName = "github-production"
 $existingCredential = az identity federated-credential list `
   --resource-group $ResourceGroup `
@@ -37,6 +38,21 @@ $existingCredential = az identity federated-credential list `
 
 if (-not $existingCredential) {
   az identity federated-credential create `
+    --resource-group $ResourceGroup `
+    --identity-name $IdentityName `
+    --name $credentialName `
+    --issuer "https://token.actions.githubusercontent.com" `
+    --subject $subject `
+    --audiences "api://AzureADTokenExchange" `
+    --output none
+}
+elseif (
+  $existingCredential.issuer -ne "https://token.actions.githubusercontent.com" -or
+  $existingCredential.subject -ne $subject -or
+  $existingCredential.audiences.Count -ne 1 -or
+  $existingCredential.audiences[0] -ne "api://AzureADTokenExchange"
+) {
+  az identity federated-credential update `
     --resource-group $ResourceGroup `
     --identity-name $IdentityName `
     --name $credentialName `
