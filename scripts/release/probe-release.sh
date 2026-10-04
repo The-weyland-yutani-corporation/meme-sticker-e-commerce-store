@@ -42,8 +42,6 @@ jq -e '
 probe_url "${app_url}/" "$home_response"
 grep -Eiq '<(html|body)([[:space:]>])' "$home_response"
 
-DATABASE_URL="$DATABASE_URL" npx prisma migrate status
-
 curl \
   --fail \
   --silent \

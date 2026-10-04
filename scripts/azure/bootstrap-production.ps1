@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
 
 if (-not $SubscriptionId) {
   throw "Pass -SubscriptionId or set AZURE_SUBSCRIPTION_ID."
@@ -75,13 +76,58 @@ if (-not $costReaderRole) {
     --output none
 }
 
-$postgresPassword = "Aa1-$(New-RandomHex 30)"
-$probeToken = New-RandomHex 32
+$postgresPassword = $null
+$probeToken = $null
+$existingAppName = az webapp list `
+  --resource-group $ResourceGroup `
+  --query "[?starts_with(name, '$NamePrefix-app-')].name | [0]" `
+  --output tsv
+
+if ($existingAppName) {
+  $existingSettings = az webapp config appsettings list `
+    --resource-group $ResourceGroup `
+    --name $existingAppName | ConvertFrom-Json
+  $existingDatabaseUrl = $existingSettings |
+    Where-Object { $_.name -eq "DATABASE_URL" } |
+    Select-Object -ExpandProperty value -First 1
+  $existingProbeToken = $existingSettings |
+    Where-Object { $_.name -eq "SYNTHETIC_PROBE_TOKEN" } |
+    Select-Object -ExpandProperty value -First 1
+
+  if ($existingDatabaseUrl -and $existingDatabaseUrl.StartsWith("postgresql://")) {
+    $databaseUri = [Uri]$existingDatabaseUrl
+    $databaseUserInfo = $databaseUri.UserInfo.Split(":", 2)
+    if ($databaseUserInfo.Count -eq 2) {
+      $postgresPassword = [Uri]::UnescapeDataString($databaseUserInfo[1])
+    }
+  }
+  if ($existingProbeToken -and -not $existingProbeToken.StartsWith("@Microsoft.KeyVault(")) {
+    $probeToken = $existingProbeToken
+  }
+}
+
+if (-not $postgresPassword) {
+  $postgresPassword = "Aa1-$(New-RandomHex 30)"
+}
+if (-not $probeToken) {
+  $probeToken = New-RandomHex 32
+}
+
+az deployment group what-if `
+  --resource-group $ResourceGroup `
+  --template-file "infra/main.bicep" `
+  --parameters `
+    location=$Location `
+    namePrefix=$NamePrefix `
+    deploymentPrincipalObjectId=$($identity.principalId) `
+    postgresAdminPassword=$postgresPassword `
+    syntheticProbeToken=$probeToken `
+    releaseSha=bootstrap `
+  --no-pretty-print | Out-Null
 
 az deployment group create `
   --resource-group $ResourceGroup `
   --template-file "infra/main.bicep" `
-  --parameters "infra/main.bicepparam" `
   --parameters `
     location=$Location `
     namePrefix=$NamePrefix `
@@ -145,19 +191,36 @@ foreach ($entry in $variables.GetEnumerator()) {
   gh variable set $entry.Key `
     --repo $Repository `
     --env production `
-    --body $entry.Value
+    --body ([string]$entry.Value)
 }
 
 $budgetStart = Get-Date -Day 1 -Hour 0 -Minute 0 -Second 0 -Format "yyyy-MM-dd"
 $budgetEnd = (Get-Date $budgetStart).AddYears(10).ToString("yyyy-MM-dd")
-az consumption budget create `
-  --budget-name "meme-forge-production" `
-  --amount $MonthlyBudgetUsd `
-  --category Cost `
-  --time-grain Monthly `
-  --start-date $budgetStart `
-  --end-date $budgetEnd `
-  --output none
+$budgetFile = New-TemporaryFile
+try {
+  @{
+    properties = @{
+      amount = $MonthlyBudgetUsd
+      category = "Cost"
+      timeGrain = "Monthly"
+      timePeriod = @{
+        startDate = "${budgetStart}T00:00:00Z"
+        endDate = "${budgetEnd}T00:00:00Z"
+      }
+    }
+  } |
+    ConvertTo-Json -Depth 5 |
+    Set-Content -Path $budgetFile -Encoding utf8
+
+  az rest `
+    --method PUT `
+    --url "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Consumption/budgets/meme-forge-production?api-version=2023-11-01" `
+    --body "@$budgetFile" `
+    --output none
+}
+finally {
+  Remove-Item $budgetFile -Force -ErrorAction SilentlyContinue
+}
 
 Write-Output "Azure production bootstrap complete."
 Write-Output "App URL: $($outputs.appUrl.value)"

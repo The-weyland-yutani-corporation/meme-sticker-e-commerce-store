@@ -33,10 +33,101 @@ var keyVaultName = take('${namePrefix}-kv-${suffix}', 24)
 var storageName = take(replace('${namePrefix}rel${suffix}', '-', ''), 24)
 var logAnalyticsName = '${namePrefix}-logs'
 var appInsightsName = '${namePrefix}-insights'
+var virtualNetworkName = '${namePrefix}-vnet'
+var appSubnetName = 'app-integration'
+var privateEndpointSubnetName = 'private-endpoints'
 var databaseName = 'memestore'
 var releaseContainerName = 'releases'
 var postgresHost = '${postgresName}.postgres.database.azure.com'
 var databaseUrl = 'postgresql://${postgresAdminLogin}:${postgresAdminPassword}@${postgresHost}:5432/${databaseName}?sslmode=require'
+
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: virtualNetworkName
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        '10.20.0.0/16'
+      ]
+    }
+  }
+}
+
+resource appSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
+  parent: virtualNetwork
+  name: appSubnetName
+  properties: {
+    addressPrefix: '10.20.1.0/24'
+    delegations: [
+      {
+        name: 'app-service'
+        properties: {
+          serviceName: 'Microsoft.Web/serverFarms'
+        }
+      }
+    ]
+  }
+}
+
+resource privateEndpointSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
+  parent: virtualNetwork
+  name: privateEndpointSubnetName
+  properties: {
+    addressPrefix: '10.20.2.0/24'
+    privateEndpointNetworkPolicies: 'Disabled'
+  }
+}
+
+resource postgresPrivateDns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.postgres.database.azure.com'
+  location: 'global'
+}
+
+resource keyVaultPrivateDns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.vaultcore.azure.net'
+  location: 'global'
+}
+
+resource blobPrivateDns 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: 'privatelink.blob.core.windows.net'
+  location: 'global'
+}
+
+resource postgresDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: postgresPrivateDns
+  name: '${virtualNetworkName}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: virtualNetwork.id
+    }
+  }
+}
+
+resource keyVaultDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: keyVaultPrivateDns
+  name: '${virtualNetworkName}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: virtualNetwork.id
+    }
+  }
+}
+
+resource blobDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: blobPrivateDns
+  name: '${virtualNetworkName}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: virtualNetwork.id
+    }
+  }
+}
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -73,6 +164,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
     minimumTlsVersion: 'TLS1_2'
+    publicNetworkAccess: 'Disabled'
     supportsHttpsTrafficOnly: true
   }
 }
@@ -121,15 +213,17 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
     clientAffinityEnabled: false
     httpsOnly: true
     serverFarmId: appPlan.id
+    virtualNetworkSubnetId: appSubnet.id
     siteConfig: {
       alwaysOn: true
-      appCommandLine: 'node server.js'
+      appCommandLine: 'bash start-production.sh'
       ftpsState: 'Disabled'
       healthCheckPath: '/api/health'
       http20Enabled: true
       linuxFxVersion: 'NODE|22-lts'
       minTlsVersion: '1.2'
       numberOfWorkers: 1
+      vnetRouteAllEnabled: true
       appSettings: [
         {
           name: 'NODE_ENV'
@@ -153,11 +247,11 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'DATABASE_URL'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=database-url)'
+          value: databaseUrl
         }
         {
           name: 'SYNTHETIC_PROBE_TOKEN'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=synthetic-probe-token)'
+          value: syntheticProbeToken
         }
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -196,7 +290,7 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview'
       mode: 'Disabled'
     }
     network: {
-      publicNetworkAccess: 'Enabled'
+      publicNetworkAccess: 'Disabled'
     }
     storage: {
       storageSizeGB: 32
@@ -245,7 +339,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableSoftDelete: true
     enabledForDeployment: false
     enabledForTemplateDeployment: true
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
     sku: {
       family: 'A'
       name: 'standard'
@@ -279,6 +373,114 @@ resource probeTokenSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
+resource postgresPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: '${namePrefix}-postgres-pe'
+  location: location
+  properties: {
+    privateLinkServiceConnections: [
+      {
+        name: 'postgres'
+        properties: {
+          groupIds: [
+            'postgresqlServer'
+          ]
+          privateLinkServiceId: postgres.id
+        }
+      }
+    ]
+    subnet: {
+      id: privateEndpointSubnet.id
+    }
+  }
+}
+
+resource postgresDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: postgresPrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'postgres'
+        properties: {
+          privateDnsZoneId: postgresPrivateDns.id
+        }
+      }
+    ]
+  }
+}
+
+resource keyVaultPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: '${namePrefix}-keyvault-pe'
+  location: location
+  properties: {
+    privateLinkServiceConnections: [
+      {
+        name: 'keyvault'
+        properties: {
+          groupIds: [
+            'vault'
+          ]
+          privateLinkServiceId: keyVault.id
+        }
+      }
+    ]
+    subnet: {
+      id: privateEndpointSubnet.id
+    }
+  }
+}
+
+resource keyVaultDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: keyVaultPrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'keyvault'
+        properties: {
+          privateDnsZoneId: keyVaultPrivateDns.id
+        }
+      }
+    ]
+  }
+}
+
+resource blobPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: '${namePrefix}-blob-pe'
+  location: location
+  properties: {
+    privateLinkServiceConnections: [
+      {
+        name: 'blob'
+        properties: {
+          groupIds: [
+            'blob'
+          ]
+          privateLinkServiceId: storage.id
+        }
+      }
+    ]
+    subnet: {
+      id: privateEndpointSubnet.id
+    }
+  }
+}
+
+resource blobDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: blobPrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'blob'
+        properties: {
+          privateDnsZoneId: blobPrivateDns.id
+        }
+      }
+    ]
+  }
+}
+
 resource webLogs 'Microsoft.Web/sites/config@2023-12-01' = {
   parent: webApp
   name: 'logs'
@@ -306,7 +508,7 @@ resource webLogs 'Microsoft.Web/sites/config@2023-12-01' = {
 
 resource availabilityTest 'Microsoft.Insights/webtests@2022-06-15' = {
   name: '${namePrefix}-availability'
-  location: 'global'
+  location: location
   kind: 'ping'
   tags: {
     'hidden-link:${appInsights.id}': 'Resource'
