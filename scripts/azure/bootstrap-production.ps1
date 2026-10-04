@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
 
 if (-not $SubscriptionId) {
   throw "Pass -SubscriptionId or set AZURE_SUBSCRIPTION_ID."
@@ -75,45 +76,70 @@ if (-not $costReaderRole) {
     --output none
 }
 
-$postgresPassword = "Aa1-$(New-RandomHex 30)"
-$probeToken = New-RandomHex 32
-
-az deployment group create `
+$existingKeyVault = az keyvault list `
   --resource-group $ResourceGroup `
-  --template-file "infra/main.bicep" `
-  --parameters "infra/main.bicepparam" `
-  --parameters `
-    location=$Location `
-    namePrefix=$NamePrefix `
-    deploymentPrincipalObjectId=$($identity.principalId) `
-    postgresAdminPassword=$postgresPassword `
-    syntheticProbeToken=$probeToken `
-    releaseSha=bootstrap `
-  --output none
+  --query "[?starts_with(name, '$NamePrefix-kv-')].name | [0]" `
+  --output tsv
+
+if ($existingKeyVault) {
+  az deployment group what-if `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/reconcile.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      releaseSha=bootstrap `
+    --no-pretty-print | Out-Null
+
+  az deployment group create `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/reconcile.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      releaseSha=bootstrap `
+    --output none
+}
+else {
+  $postgresPassword = "Aa1-$(New-RandomHex 30)"
+  $probeToken = New-RandomHex 32
+
+  az deployment group what-if `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/main.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      postgresAdminPassword=$postgresPassword `
+      syntheticProbeToken=$probeToken `
+      releaseSha=bootstrap `
+    --no-pretty-print | Out-Null
+
+  az deployment group create `
+    --resource-group $ResourceGroup `
+    --name main `
+    --template-file "infra/main.bicep" `
+    --parameters `
+      location=$Location `
+      namePrefix=$NamePrefix `
+      deploymentPrincipalObjectId=$($identity.principalId) `
+      postgresAdminPassword=$postgresPassword `
+      syntheticProbeToken=$probeToken `
+      releaseSha=bootstrap `
+    --output none
+}
 
 $subscription = az account show | ConvertFrom-Json
 $outputs = az deployment group show `
   --resource-group $ResourceGroup `
   --name main `
   --query properties.outputs | ConvertFrom-Json
-
-$storageId = az storage account show `
-  --resource-group $ResourceGroup `
-  --name $outputs.storageAccountName.value `
-  --query id --output tsv
-$blobContributorRole = az role assignment list `
-  --assignee-object-id $identity.principalId `
-  --scope $storageId `
-  --role "Storage Blob Data Contributor" `
-  --query "[0].id" --output tsv
-if (-not $blobContributorRole) {
-  az role assignment create `
-    --assignee-object-id $identity.principalId `
-    --assignee-principal-type ServicePrincipal `
-    --scope $storageId `
-    --role "Storage Blob Data Contributor" `
-    --output none
-}
 
 $env:AZURE_APP_NAME = $outputs.appName.value
 $env:AZURE_POSTGRES_NAME = $outputs.postgresName.value
@@ -145,19 +171,36 @@ foreach ($entry in $variables.GetEnumerator()) {
   gh variable set $entry.Key `
     --repo $Repository `
     --env production `
-    --body $entry.Value
+    --body ([string]$entry.Value)
 }
 
 $budgetStart = Get-Date -Day 1 -Hour 0 -Minute 0 -Second 0 -Format "yyyy-MM-dd"
 $budgetEnd = (Get-Date $budgetStart).AddYears(10).ToString("yyyy-MM-dd")
-az consumption budget create `
-  --budget-name "meme-forge-production" `
-  --amount $MonthlyBudgetUsd `
-  --category Cost `
-  --time-grain Monthly `
-  --start-date $budgetStart `
-  --end-date $budgetEnd `
-  --output none
+$budgetFile = New-TemporaryFile
+try {
+  @{
+    properties = @{
+      amount = $MonthlyBudgetUsd
+      category = "Cost"
+      timeGrain = "Monthly"
+      timePeriod = @{
+        startDate = "${budgetStart}T00:00:00Z"
+        endDate = "${budgetEnd}T00:00:00Z"
+      }
+    }
+  } |
+    ConvertTo-Json -Depth 5 |
+    Set-Content -Path $budgetFile -Encoding utf8
+
+  az rest `
+    --method PUT `
+    --url "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.Consumption/budgets/meme-forge-production?api-version=2023-11-01" `
+    --body "@$budgetFile" `
+    --output none
+}
+finally {
+  Remove-Item $budgetFile -Force -ErrorAction SilentlyContinue
+}
 
 Write-Output "Azure production bootstrap complete."
 Write-Output "App URL: $($outputs.appUrl.value)"

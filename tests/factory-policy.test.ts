@@ -16,6 +16,21 @@ const preflight = readFileSync(
 );
 const parameters = readFileSync("infra/main.bicepparam", "utf8");
 const bootstrapDocs = readFileSync("docs/factory-bootstrap.md", "utf8");
+const infrastructure = readFileSync("infra/main.bicep", "utf8");
+const reconciliation = readFileSync("infra/reconcile.bicep", "utf8");
+const releaseWorkflow = readFileSync(
+  ".github/workflows/release-health.yml",
+  "utf8",
+);
+const packageApp = readFileSync("scripts/release/package-app.sh", "utf8");
+const startProduction = readFileSync(
+  "scripts/release/start-production.sh",
+  "utf8",
+);
+const verifyStartup = readFileSync(
+  "scripts/release/verify-startup.mjs",
+  "utf8",
+);
 
 describe("factory infrastructure authority", () => {
   it("reserves infrastructure changes for the governance lane", () => {
@@ -45,5 +60,65 @@ describe("factory infrastructure authority", () => {
     expect(preflight).not.toMatch(
       /az\s+(group|identity)\s+create|az\s+role\s+assignment\s+create|az\s+deployment\s+\w+\s+create|az\s+consumption\s+budget\s+create|gh\s+variable\s+set/,
     );
+  });
+
+  it("keeps production data services private and App Service VNet integrated", () => {
+    expect(infrastructure).toContain(
+      "resource privateEndpointSubnet 'Microsoft.Network/virtualNetworks/subnets",
+    );
+    expect(infrastructure).toContain("virtualNetworkSubnetId: appSubnet.id");
+    expect(infrastructure).toContain("vnetRouteAllEnabled: true");
+    expect(infrastructure.match(/publicNetworkAccess: 'Disabled'/g)).toHaveLength(
+      3,
+    );
+    expect(infrastructure).toContain(
+      "resource postgresPrivateEndpoint 'Microsoft.Network/privateEndpoints",
+    );
+    expect(infrastructure).toContain(
+      "resource keyVaultPrivateEndpoint 'Microsoft.Network/privateEndpoints",
+    );
+    expect(infrastructure).toContain(
+      "resource blobPrivateEndpoint 'Microsoft.Network/privateEndpoints",
+    );
+    expect(infrastructure).toContain(
+      "value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=database-url)'",
+    );
+    expect(infrastructure).toContain(
+      "value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=synthetic-probe-token)'",
+    );
+    expect(reconciliation).toContain(
+      "postgresAdminPassword: keyVault.getSecret('postgres-admin-password')",
+    );
+    expect(reconciliation).toContain(
+      "syntheticProbeToken: keyVault.getSecret('synthetic-probe-token')",
+    );
+  });
+
+  it("keeps runner releases off private Azure data planes", () => {
+    expect(releaseWorkflow).toContain("actions/upload-artifact@");
+    expect(releaseWorkflow).toContain('gh run download "$PREVIOUS_RUN_ID"');
+    expect(releaseWorkflow).not.toContain("az storage blob");
+    expect(releaseWorkflow).not.toContain("az keyvault secret");
+    expect(releaseWorkflow).not.toContain("az webapp config appsettings list");
+    expect(releaseWorkflow).not.toContain(
+      "postgres flexible-server firewall-rule create",
+    );
+    expect(releaseWorkflow).not.toContain("npm run db:migrate");
+    expect(bootstrap).not.toContain("Storage Blob Data Contributor");
+  });
+
+  it("packages Prisma and runs migrations inside App Service", () => {
+    expect(packageApp).toContain("--omit=dev");
+    expect(packageApp).toContain(
+      'test -f "$package_dir/node_modules/prisma/build/index.js"',
+    );
+    expect(packageApp).toContain("start-production.sh");
+    expect(startProduction).toContain(
+      "node node_modules/prisma/build/index.js migrate deploy",
+    );
+    expect(startProduction).toContain("node verify-startup.mjs");
+    expect(startProduction).toContain('wait "$server_pid"');
+    expect(verifyStartup).toContain("/api/internal/synthetic-order");
+    expect(verifyStartup).toContain("startup_verification.passed");
   });
 });

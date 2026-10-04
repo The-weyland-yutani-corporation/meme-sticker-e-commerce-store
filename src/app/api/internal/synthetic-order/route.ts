@@ -4,6 +4,7 @@ import {
   createPaymentFreeOrder,
   verifyAndDeleteSyntheticOrder,
 } from "@/application/orders";
+import { isTrustedGitHubActionsToken } from "@/security/github-oidc";
 
 function tokenMatches(received: string, expected: string) {
   const receivedHash = createHash("sha256").update(received).digest();
@@ -13,18 +14,16 @@ function tokenMatches(received: string, expected: string) {
 
 export async function POST(request: Request) {
   const expectedToken = process.env.SYNTHETIC_PROBE_TOKEN;
-  if (!expectedToken) {
-    return NextResponse.json(
-      { error: "Synthetic probe is not configured." },
-      { status: 503 },
-    );
-  }
-
   const authorization = request.headers.get("authorization") ?? "";
   const receivedToken = authorization.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
     : "";
-  if (!tokenMatches(receivedToken, expectedToken)) {
+  const keyVaultTokenMatches =
+    Boolean(expectedToken) && tokenMatches(receivedToken, expectedToken ?? "");
+  if (
+    !keyVaultTokenMatches &&
+    !(await isTrustedGitHubActionsToken(receivedToken))
+  ) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
