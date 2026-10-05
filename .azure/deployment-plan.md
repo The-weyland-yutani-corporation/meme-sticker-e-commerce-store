@@ -1,6 +1,6 @@
 # Azure Deployment Plan
 
-> **Status:** Validated
+> **Status:** Deployed
 
 Generated: 2026-10-04T13:16:56Z
 
@@ -125,9 +125,9 @@ Generated: 2026-10-04T13:16:56Z
 - [x] Invoke azure-deploy skill
 - [x] Bootstrap deployment successful
 - [x] Live Azure resources, private endpoints, DNS, and RBAC verified
-- [ ] First exact-SHA application release successful
-- [ ] Report the deployed HTTPS endpoint
-- [ ] Update status to Deployed
+- [x] First exact-SHA application release successful
+- [x] Report the deployed HTTPS endpoint
+- [x] Update status to Deployed
 
 ## 7. Validation Proof
 
@@ -155,24 +155,31 @@ Generated: 2026-10-04T13:16:56Z
 | Immutable OIDC specification | [GitHub changelog](https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/), [GitHub repository OIDC API](https://docs.github.com/en/rest/actions/oidc#get-the-customization-template-for-an-oidc-subject-claim-for-a-repository), and [Microsoft Entra migration guidance](https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-github-immutable-subjects) | ✅ Official sources document the `repo:owner@owner_id/repository@repository_id` format plus the `use_immutable_subject` and `sub_claim_prefix` response fields | 2026-10-04T20:03:00Z |
 | Live GitHub OIDC assertion | `gh run view 37223574750 --log-failed` | ✅ Azure Login logged the presented subject as `repo:The-weyland-yutani-corporation@264313301/meme-sticker-e-commerce-store@1385623955:environment:production`; the run failed because Azure still trusted the legacy subject | 2026-10-04T18:51:00Z |
 | Stable GitHub federation | `az identity federated-credential show ...` | ✅ Subject reconciled to `owner@id/repository@id:environment:production`, matching the live GitHub claim | 2026-10-04T18:24:00Z |
+| Autonomous production release | [GitHub Actions run `37263203006`](https://github.com/The-weyland-yutani-corporation/meme-sticker-e-commerce-store/actions/runs/37263203006) | ✅ Exact SHA `767a27002e94ce071fbfe93674845d0e7ba0041c` deployed from retained artifact `production-package-767a27002e94ce071fbfe93674845d0e7ba0041c`; GitHub deployment `6851340806` and Azure OneDeploy `57fd724c-6be7-48a8-9f26-4f81cdc85578` succeeded | 2026-10-05T04:31:42Z |
+| Production application gates | `scripts/release/probe-release.sh https://memeforge-app-hkxi7iyrxtbso.azurewebsites.net` in run `37263203006` | ✅ Exact-SHA health, storefront HTML, database access, GitHub OIDC authentication, synthetic-order creation, and verified deletion passed | 2026-10-05T04:31:42Z |
+| Monitor-only reconciliation | [GitHub Actions run `37263952310`](https://github.com/The-weyland-yutani-corporation/meme-sticker-e-commerce-store/actions/runs/37263952310) | ✅ Controller selected the no-deploy path and repeated all production probes successfully | 2026-10-05T04:32:26Z |
+| Retained-package rollback | [GitHub Actions run `37260482653`](https://github.com/The-weyland-yutani-corporation/meme-sticker-e-commerce-store/actions/runs/37260482653) | ✅ A failed forward upload restored retained SHA `c9be05a1fafd7236870cf0020a626a7619f82ad3`, then passed exact-SHA, storefront, database, and synthetic-order cleanup gates without database rollback | 2026-10-05T03:51:22Z |
 
 **Validated by:** azure-validate skill workflow
+
+**Deployed by:** autonomous Azure release controller
 
 ## 8. Files
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `.azure/deployment-plan.md` | Deployment source of truth | Private foundation deployed; application release pending |
+| `.azure/deployment-plan.md` | Deployment source of truth | Deployed and verified |
 | `infra/main.bicep` | Production resource graph | Deployed |
 | `infra/main.bicepparam` | Central US production parameters | Ready |
 | `infra/preflight.bicep` | Read-only subscription provider validation | Ready |
 | `scripts/azure/bootstrap-production.ps1` | Approved one-time owner bootstrap | Ready |
 | `scripts/azure/preflight-production.ps1` | Non-mutating readiness validation | Ready |
 
-## 9. Next Steps
+## 9. Operating State
 
-> Current: first governed exact-SHA application release
+> Current: lights-off production reconciliation
 
-1. Merge the governed private-production release changes.
-2. Dispatch the autonomous release controller.
-3. Verify exact-SHA health, storefront, synthetic order, telemetry, and rollback evidence.
+1. The 15-minute release controller reconciles the latest `main` SHA to production.
+2. Exact-SHA health, storefront, database, and authenticated synthetic-order cleanup determine release and monitoring success.
+3. Failed application releases restore the previous retained package; database migrations remain additive-only and are never rolled back.
+4. Production endpoint: https://memeforge-app-hkxi7iyrxtbso.azurewebsites.net
