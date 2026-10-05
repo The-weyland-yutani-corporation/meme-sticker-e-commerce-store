@@ -8,6 +8,8 @@ health_response="$(mktemp)"
 home_response="$(mktemp)"
 synthetic_response="$(mktemp)"
 trap 'rm -f "$health_response" "$home_response" "$synthetic_response"' EXIT
+probe_attempts="${PROBE_ATTEMPTS:-5}"
+probe_interval_seconds="${PROBE_INTERVAL_SECONDS:-10}"
 
 probe_url() {
   local url="$1"
@@ -20,12 +22,12 @@ probe_url() {
     --max-time 15
   )
 
-  for attempt in 1 2 3 4 5; do
+  for ((attempt = 1; attempt <= probe_attempts; attempt += 1)); do
     if curl "${curl_arguments[@]}" "$url" >"$output_file"; then
       return 0
     fi
-    if (( attempt < 5 )); then
-      sleep 10
+    if (( attempt < probe_attempts )); then
+      sleep "$probe_interval_seconds"
     fi
   done
 
