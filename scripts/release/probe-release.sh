@@ -34,12 +34,33 @@ probe_url() {
   return 1
 }
 
-probe_url "${app_url}/api/health" "$health_response"
-jq -e '
-  .status == "ok" and
-  .service == "meme-sticker-store" and
-  .version == env.EXPECTED_RELEASE_SHA
-' "$health_response" >/dev/null
+probe_health() {
+  local curl_arguments=(
+    --fail
+    --silent
+    --show-error
+    --location
+    --max-time 15
+  )
+
+  for ((attempt = 1; attempt <= probe_attempts; attempt += 1)); do
+    if curl "${curl_arguments[@]}" "${app_url}/api/health" >"$health_response" &&
+      jq -e '
+        .status == "ok" and
+        .service == "meme-sticker-store" and
+        .version == env.EXPECTED_RELEASE_SHA
+      ' "$health_response" >/dev/null; then
+      return 0
+    fi
+    if (( attempt < probe_attempts )); then
+      sleep "$probe_interval_seconds"
+    fi
+  done
+
+  return 1
+}
+
+probe_health
 
 probe_url "${app_url}/" "$home_response"
 grep -Eiq '<(html|body)([[:space:]>])' "$home_response"
