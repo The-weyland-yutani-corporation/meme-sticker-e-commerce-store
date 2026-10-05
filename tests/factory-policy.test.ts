@@ -117,6 +117,13 @@ describe("factory infrastructure authority", () => {
     expect(probeRelease).toContain(
       'probe_interval_seconds="${PROBE_INTERVAL_SECONDS:-10}"',
     );
+    expect(probeRelease).toContain("probe_health()");
+    expect(probeRelease).toContain(
+      ".version == env.EXPECTED_RELEASE_SHA",
+    );
+    expect(probeRelease).toMatch(
+      /for \(\(attempt = 1; attempt <= probe_attempts; attempt \+= 1\)\); do[\s\S]*\.version == env\.EXPECTED_RELEASE_SHA/,
+    );
   });
 
   it("packages Prisma and runs migrations inside App Service", () => {
