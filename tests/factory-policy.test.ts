@@ -112,6 +112,7 @@ describe("factory infrastructure authority", () => {
     expect(releaseWorkflow).toContain("--async true");
     expect(releaseWorkflow).toContain("--track-status false");
     expect(releaseWorkflow).toContain("PROBE_ATTEMPTS: 30");
+    expect(releaseWorkflow).toContain("PROBE_ATTEMPTS: 20");
     expect(probeRelease).toContain('probe_attempts="${PROBE_ATTEMPTS:-5}"');
     expect(probeRelease).toContain(
       'probe_interval_seconds="${PROBE_INTERVAL_SECONDS:-10}"',
