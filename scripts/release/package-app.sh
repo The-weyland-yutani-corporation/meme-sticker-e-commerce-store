@@ -26,6 +26,8 @@ npm ci \
   --no-audit \
   --no-fund
 cp -R node_modules/.prisma "$package_dir/node_modules/.prisma"
+rm -rf "$package_dir/node_modules/@prisma/engines"
+cp -R node_modules/@prisma/engines "$package_dir/node_modules/@prisma/engines"
 chmod +x "$package_dir/start-production.sh"
 
 if command -v zip >/dev/null 2>&1; then
@@ -42,6 +44,8 @@ test -f "$package_dir/server.js"
 test -d "$package_dir/.next/static"
 test -d "$package_dir/prisma/migrations"
 test -f "$package_dir/node_modules/prisma/build/index.js"
+test -f \
+  "$package_dir/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x"
 test -x "$package_dir/start-production.sh"
 test -f "$package_dir/verify-startup.mjs"
 
