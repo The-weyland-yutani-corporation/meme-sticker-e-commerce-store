@@ -20,6 +20,7 @@ authority:
       - ".factory/**"
       - ".github/**"
       - "infra/**"
+      - "scripts/release/**"
     required_labels:
       - factory:managed
       - factory:governance
@@ -79,6 +80,7 @@ risk:
       - ".github/**"
       - ".factory/**"
       - "infra/**"
+      - "scripts/release/**"
   prohibited:
     paths:
       - ".factory/policy.yml"
