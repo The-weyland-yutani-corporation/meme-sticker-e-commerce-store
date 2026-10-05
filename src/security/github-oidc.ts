@@ -8,7 +8,14 @@ const issuer = "https://token.actions.githubusercontent.com";
 const audience = "meme-forge-synthetic-order";
 const repository =
   "The-weyland-yutani-corporation/meme-sticker-e-commerce-store";
-const subject = `repo:${repository}:environment:production`;
+const repositoryId = "1385623955";
+const repositoryOwnerId = "264313301";
+const [repositoryOwner, repositoryName] = repository.split("/");
+// https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/
+const productionSubjects = new Set([
+  `repo:${repository}:environment:production`,
+  `repo:${repositoryOwner}@${repositoryOwnerId}/${repositoryName}@${repositoryId}:environment:production`,
+]);
 
 type JsonObject = Record<string, unknown>;
 
@@ -57,7 +64,10 @@ export function verifyGitHubActionsOidcToken(
       claims.iss !== issuer ||
       !hasAudience(claims.aud) ||
       claims.repository !== repository ||
-      claims.sub !== subject ||
+      claims.repository_id !== repositoryId ||
+      claims.repository_owner_id !== repositoryOwnerId ||
+      typeof claims.sub !== "string" ||
+      !productionSubjects.has(claims.sub) ||
       typeof claims.exp !== "number" ||
       typeof claims.nbf !== "number"
     ) {
