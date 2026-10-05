@@ -112,6 +112,10 @@ describe("factory infrastructure authority", () => {
     expect(packageApp).toContain(
       'test -f "$package_dir/node_modules/prisma/build/index.js"',
     );
+    expect(packageApp).toContain(
+      'cp -R node_modules/@prisma/engines "$package_dir/node_modules/@prisma/engines"',
+    );
+    expect(packageApp).toContain("-name 'schema-engine-*'");
     expect(packageApp).toContain("start-production.sh");
     expect(startProduction).toContain(
       "node node_modules/prisma/build/index.js migrate deploy",
