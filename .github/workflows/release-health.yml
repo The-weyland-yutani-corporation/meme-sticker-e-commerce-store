@@ -278,10 +278,14 @@ jobs:
             --type zip \
             --clean true \
             --restart true \
-            --async false \
+            --async true \
+            --track-status false \
             --output none
 
       - name: Run production gates
+        env:
+          PROBE_ATTEMPTS: 30
+          PROBE_INTERVAL_SECONDS: 10
         run: scripts/release/probe-release.sh "$APP_URL"
 
       - name: Roll back failed application deployment
@@ -324,9 +328,13 @@ jobs:
             --type zip \
             --clean true \
             --restart true \
-            --async false \
+            --async true \
+            --track-status false \
             --output none
-          EXPECTED_RELEASE_SHA="$PREVIOUS_SHA" scripts/release/probe-release.sh "$APP_URL"
+          EXPECTED_RELEASE_SHA="$PREVIOUS_SHA" \
+            PROBE_ATTEMPTS=30 \
+            PROBE_INTERVAL_SECONDS=10 \
+            scripts/release/probe-release.sh "$APP_URL"
           echo "verified=true" >>"$GITHUB_OUTPUT"
 
       - name: Record production result
