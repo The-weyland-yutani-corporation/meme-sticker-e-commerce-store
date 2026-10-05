@@ -426,6 +426,8 @@ jobs:
     env:
       APP_URL: ${{ vars.APP_URL }}
       EXPECTED_RELEASE_SHA: ${{ needs.plan.outputs.target_sha }}
+      PROBE_ATTEMPTS: 20
+      PROBE_INTERVAL_SECONDS: 10
       TARGET_SHA: ${{ needs.plan.outputs.target_sha }}
     steps:
       - name: Check out deployed SHA
