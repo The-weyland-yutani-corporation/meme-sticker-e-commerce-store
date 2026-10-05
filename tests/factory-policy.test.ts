@@ -23,6 +23,7 @@ const releaseWorkflow = readFileSync(
   "utf8",
 );
 const packageApp = readFileSync("scripts/release/package-app.sh", "utf8");
+const probeRelease = readFileSync("scripts/release/probe-release.sh", "utf8");
 const startProduction = readFileSync(
   "scripts/release/start-production.sh",
   "utf8",
@@ -105,6 +106,16 @@ describe("factory infrastructure authority", () => {
     );
     expect(releaseWorkflow).not.toContain("npm run db:migrate");
     expect(bootstrap).not.toContain("Storage Blob Data Contributor");
+  });
+
+  it("deploys asynchronously and gates on bounded application readiness", () => {
+    expect(releaseWorkflow).toContain("--async true");
+    expect(releaseWorkflow).toContain("--track-status false");
+    expect(releaseWorkflow).toContain("PROBE_ATTEMPTS: 30");
+    expect(probeRelease).toContain('probe_attempts="${PROBE_ATTEMPTS:-5}"');
+    expect(probeRelease).toContain(
+      'probe_interval_seconds="${PROBE_INTERVAL_SECONDS:-10}"',
+    );
   });
 
   it("packages Prisma and runs migrations inside App Service", () => {
