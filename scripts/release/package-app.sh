@@ -44,13 +44,8 @@ test -f "$package_dir/server.js"
 test -d "$package_dir/.next/static"
 test -d "$package_dir/prisma/migrations"
 test -f "$package_dir/node_modules/prisma/build/index.js"
-find "$package_dir/node_modules/@prisma/engines" \
-  -maxdepth 1 \
-  -type f \
-  -name 'schema-engine-*' \
-  -print \
-  -quit |
-  grep -q .
+test -f \
+  "$package_dir/node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x"
 test -x "$package_dir/start-production.sh"
 test -f "$package_dir/verify-startup.mjs"
 
