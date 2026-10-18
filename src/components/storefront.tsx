@@ -120,6 +120,9 @@ export function Storefront({ products }: { products: readonly Product[] }) {
       </header>
 
       <main id="top">
+        <p className="demo-notice" role="note">
+          Reference demo · No payment collected · Fulfillment is mocked; no physical shipment.
+        </p>
         <section className="hero">
           <div className="hero-copy">
             <p className="eyebrow">
@@ -285,7 +288,7 @@ export function Storefront({ products }: { products: readonly Product[] }) {
               </span>
               <div>
                 <b>04 / Ship</b>
-                <h3>Canary, observe, promote.</h3>
+                <h3>Deploy, probe, recover.</h3>
                 <p>Bad signals roll back automatically and open an incident.</p>
               </div>
             </li>

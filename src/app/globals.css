@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  --font-display: "Arial", "Helvetica", sans-serif;
+  --font-mono: "Courier New", monospace;
   --ink: #f4f5ef;
   --muted: #a6ada7;
   --panel: #151916;
@@ -45,6 +47,14 @@ a {
 .site-shell {
   min-height: 100vh;
   overflow: hidden;
+}
+
+.demo-notice {
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 0.8rem 5vw;
 }
 
 .site-header {
