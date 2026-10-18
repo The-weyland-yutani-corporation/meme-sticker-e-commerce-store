@@ -239,6 +239,11 @@ browser tabs. Keep only the selected synthetic product details and test outcomes
   Reproduce with `npm audit`; the underlying advisory is
   https://github.com/advisories/GHSA-vfj7-8cjw-p6xm. The production-only audit does
   not cover development tooling and must not be presented as a clean full audit.
+- An independent read-only change review found no significant issues. The parallel
+  validation service's automated reviewer could not load its configured model.
+  Its CodeQL result reported zero alerts but skipped unchanged actions/JavaScript
+  analyses; this is not evidence of a fresh scan. Retain this limitation with the
+  local checks and require the normal remote `Analyze` gate before merge.
 - General questions: repository issues, with synthetic diagnostics only.
 - Security findings: use GitHub private vulnerability reporting **if enabled**.
   If unavailable, obtain an owner-approved private channel before sharing details.

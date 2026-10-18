@@ -41,6 +41,18 @@
     "development_audit": "5 high-severity findings in ESLint braces/fast-glob/micromatch dependency chain remain",
     "browser": "HTTP checkout, live database verification, desktop/mobile capture, keyboard Enter add/close, and no horizontal overflow at 390px passed; not a full accessibility audit"
   },
+  "follow_up_validation": {
+    "source_commit": "22fe01537f206c427928b6160fa28efe6c83517d",
+    "node24_version": "24.21.0",
+    "node22_version": "22.23.3",
+    "node24": "npm run check and npm run test:coverage passed with all 41 tests, including real PostgreSQL acceptance",
+    "node22_package": "Existing package-app.sh built an immutable standalone archive; packaged start-production.sh applied migrations and passed health plus authenticated synthetic-order verification/cleanup",
+    "video_probe": "VP9, 1440x900, 300 seconds, 1678009 bytes; external WebVTT captions",
+    "independent_read_only_review": "No significant issues found",
+    "automated_review": "Unavailable: requested model was not present in the validation service registry",
+    "codeql": "Tool reported zero alerts but skipped actions/javascript analysis as unchanged since its last run; not a fresh scan",
+    "secret_scan": "No secrets detected in changed configuration, code, documentation and captured assets"
+  },
   "recording": {
     "duration_seconds": 300,
     "frames_per_second": 1,
