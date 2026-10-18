@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meme Forge — five-minute local demo</title>
+<style>
+  body { margin: 2rem auto; padding: 0 1rem; max-width: 1000px; background: #080a08; color: #f4f5ef; font: 1rem/1.6 system-ui, sans-serif; }
+  video { width: 100%; background: black; }
+  a { color: #a4ff4f; }
+</style>
+<h1>Meme Forge: five-minute local demo</h1>
+<p>Real local browser capture with synthetic data. Not evidence of Azure deployment or catalog approval.</p>
+<video controls preload="metadata">
+  <source src="walkthrough.webm" type="video/webm">
+  <track default kind="captions" src="walkthrough.vtt" srclang="en" label="English">
+  Your browser cannot play this video. Download the WebM and read the transcript below.
+</video>
+<p><a href="walkthrough.vtt">Captions / transcript</a> · <a href="../accelerator-guide.mdx">Presenter guide and limitations</a></p>
+<p>Serve the repository locally with <code>python3 -m http.server 8000 --bind 127.0.0.1</code> and open
+<code>http://localhost:8000/docs/assets/walkthrough.html</code> so captions load over HTTP.</p>
+</html>

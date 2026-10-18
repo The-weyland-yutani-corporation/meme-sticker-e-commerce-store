@@ -1,0 +1,37 @@
+WEBVTT
+
+00:00.000 --> 00:40.000
+Meme Forge helps teams test a complete commerce journey without connecting real payments or shipping.
+This recording uses a local production build and disposable PostgreSQL, not a live Azure deployment.
+
+00:40.000 --> 01:00.000
+The version-controlled catalog supplies product context and prices.
+Choose Ship It and Senior Duck Engineer for the reference journey.
+
+01:00.000 --> 01:35.000
+Add Ship It. The cart opens and shows the selected product.
+The browser holds cart state; it is not an inventory or payment system.
+
+01:35.000 --> 02:05.000
+Add Senior Duck Engineer. One of each totals $9.98.
+Checkout submits product identifiers and quantities, not trusted prices.
+
+02:05.000 --> 02:40.000
+Adjust the quantity and restore one of each.
+The server independently resolves prices before persisting the order.
+
+02:40.000 --> 03:20.000
+Create the test order. No payment is collected and fulfillment is mocked.
+This generic confirmation page is not independent proof of database persistence.
+
+03:20.000 --> 04:00.000
+Presenter evidence now shows a real database read for this checkout and the live health response.
+Only product names, quantities, amounts, and status are shown; identifiers and tokens are omitted.
+
+04:00.000 --> 04:30.000
+The architecture separates the application from optional governed delivery.
+Azure deployment and external governance require separate approval and verification.
+
+04:30.000 --> 05:00.000
+Next step: bring a product owner and platform lead to choose one customer journey and a bounded pilot.
+Agree on integration dependencies, security controls, ownership, and measurable acceptance criteria.

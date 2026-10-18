@@ -288,7 +288,7 @@ export function Storefront({ products }: { products: readonly Product[] }) {
               </span>
               <div>
                 <b>04 / Ship</b>
-                <h3>Canary, observe, promote.</h3>
+                <h3>Deploy, probe, recover.</h3>
                 <p>Bad signals roll back automatically and open an incident.</p>
               </div>
             </li>
