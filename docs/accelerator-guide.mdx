@@ -1,0 +1,311 @@
+# Meme Forge accelerator field kit
+
+## Readiness assessment
+
+| Field | Assessment |
+|---|---|
+| Build | Meme Forge — Azure Commerce and Governed Delivery Accelerator |
+| Repository | https://github.com/The-weyland-yutani-corporation/meme-sticker-e-commerce-store |
+| Account | Reusable / cross-industry (assumption; no customer supplied) |
+| Industry | Retail scenario; delivery patterns apply cross-industry |
+| Primary persona | Platform engineering lead |
+| Secondary personas | Developer, product owner, SE/CSA |
+| Desired readiness | Catalog-ready (assumption) |
+| Current rating | 6/10: locally verified demo candidate; not catalog-approved |
+| Live deployment | Not verified by this readiness exercise |
+
+This is an internal assessment, not a Microsoft certification. The score recognizes
+reproducible local checks, PostgreSQL acceptance, presenter assets and documentation.
+It does not imply production suitability, customer adoption, or catalog acceptance.
+
+### Top three remaining fixes before external sharing
+
+1. Obtain owner-approved licensing and rights review for branding, meme names,
+   emoji rendering, dependencies, and all redistributed media.
+2. Assign an accountable maintainer and private security contact; complete an
+   independent SE/CSA rehearsal and approved nonproduction deployment proof.
+3. Obtain the catalog schema, taxonomy and contribution guide through authorized
+   enterprise access; validate the draft metadata and complete submission review.
+
+## Customer story and journey
+
+Digital commerce teams need to test shopping experiences without connecting real
+payment and fulfillment systems for every experiment. Manual handoffs and isolated
+prototypes obscure whether a shopping journey actually works and whether a change
+can be deployed safely. Meme Forge connects selection, server-side pricing, and
+persisted test orders with an Azure infrastructure and governed delivery reference.
+It helps product and platform teams agree the next integration and operating controls.
+
+1. **Request:** Agree a low-risk commerce experiment and the product owner's hypothesis.
+2. **Inputs:** Use the version-controlled six-product USD catalog; no customer PII.
+3. **Context:** Explain sample prices, quantity limits, and mocked integrations.
+4. **Workflow:** Select products, adjust cart, submit identifiers and quantities.
+5. **Processing:** Validate input, resolve prices on the server, create order/items together.
+6. **Output:** Return a confirmation URL; independently read the persisted order.
+7. **Operating context:** Check database health and discuss deployment/recovery evidence.
+8. **Next action:** Choose one adaptation, its owner, and a pilot scorecard.
+
+The generic success page can be opened directly. It is not proof of persistence.
+Runtime AI, real payments, inventory reservation, tax, shipping and customer identity
+are not implemented. Agentic capabilities concern software delivery.
+
+## Setup and sample data
+
+Follow the root README. Use Node 22.13+ or 24, PostgreSQL 16, `npm ci`, a root
+`.env`, and `npm run db:migrate`. Both migrations are committed. The seed command
+checks connectivity using the same PostgreSQL adapter as the app; it does not
+insert products. Product prices are integer cents in `src/domain/catalog.ts`.
+
+| Reference product | Slug | Cents |
+|---|---|---|
+| Ship It | ship-it | 449 |
+| Senior Duck Engineer | rubber-duck-debugger | 549 |
+| Reference cart | One of each | 998 |
+
+Next.js loads `.env` and gives `.env.local` higher precedence. Prisma CLI loads
+`.env`, not Next.js's full precedence chain. The seed command explicitly loads
+`.env` via Node/tsx. Vitest requires exported test variables. Existing shell
+variables win; remove conflicting overrides rather than copying production secrets.
+
+### Presenter preflight
+
+- Use a disposable database with a name ending in `_test`; apply committed migrations.
+- Run `npm run check`, coverage, production dependency audit and the explicit database suite.
+- Open `/api/health`; require HTTP 200 and `status: ok`.
+- Confirm an empty cart, clean browser profile, working keyboard controls and no real data.
+- Identify the source revision and distinguish local evidence from Azure deployment proof.
+- Have the screenshot/video package available if the database or network fails.
+- Never silently replace failed persistence with a hard-coded success response.
+
+## Five-minute presenter script
+
+| Time | Action and talk track | Checkpoint |
+|---|---|---|
+| 0:00–0:40 | Explain the customer problem and payment-free/mocked boundaries | Audience understands the experiment |
+| 0:40–1:40 | Browse catalog; add Ship It and Senior Duck Engineer | Real product context and cart |
+| 1:40–2:30 | Adjust quantity, restore one of each | Subtotal $9.98 |
+| 2:30–3:30 | Create a test order; reach confirmation | No payment or shipment implied |
+| 3:30–4:20 | Show sanitized database evidence and health | 998 cents, two items, healthy DB |
+| 4:20–5:00 | Show architecture and propose adaptation workshop | Named next action |
+
+The included silent five-minute browser recording follows these phases with
+English captions/transcript. Its presenter evidence panel is an evidence display,
+not a new application route. Serve the viewer over local HTTP so caption tracks load.
+
+## Fifteen-minute presenter script
+
+| Time | Action | Outcome |
+|---|---|---|
+| 0–2 min | Customer story, personas, constraints | Agreed business hypothesis |
+| 2–6 min | Complete cart and test-order journey | Useful end-to-end outcome |
+| 6–8 min | Trace route, server catalog, order service and database | Explain trust and persistence |
+| 8–11 min | Architecture, private endpoints/DNS, managed identity, OIDC | Discuss operating requirements |
+| 11–13 min | Review recorded checks and release design | Distinguish proven behavior from design |
+| 13–15 min | Discovery, pilot acceptance, CTA | Agree owner and next step |
+
+For the optional factory extension, use existing approved workflow evidence rather
+than waiting for scheduled automation during the demo. Do not trigger unattended
+changes or a production deployment for presentation purposes.
+
+### Independent, read-only persistence evidence
+
+On the disposable demo database, use your SQL client to inspect only the order
+created during the demonstration. Bind `:confirmation_token` to the checkout
+response's `orderId` (a bearer-like reference; never publish it):
+
+```sql
+SELECT o."amountTotal", o.currency, o.status, o."checkoutMode",
+       i."productName", i.quantity, i."unitAmount"
+FROM "Order" o
+JOIN "OrderItem" i ON i."orderId" = o.id
+WHERE o."confirmationToken" = :confirmation_token
+ORDER BY i."productSlug";
+```
+
+Expected: total 998, currency `usd`, `FULFILLMENT_PENDING`, `PAYMENT_FREE`,
+two rows with quantity 1 and unit amounts 449 and 549. The test suite verifies
+these using the real route and a separate database client; browser captures verify
+the HTTP journey separately. Never show connection strings, tokens, emails, or raw IDs.
+
+### Reset and failure recovery
+
+- Refreshing the storefront resets its in-memory cart.
+- Database acceptance removes only the orders it creates, including cascade-deleted items.
+- Browser-demo orders remain until the disposable environment is removed.
+- For a clean local Docker reset, remove the named demo container, recreate it,
+  and reapply migrations. Do not issue blanket DELETE/TRUNCATE on shared databases.
+- If checkout returns 503, check database availability, credentials and migrations.
+- If health returns 503, do not describe the deployment as healthy.
+- Missing products after a fork: check the code catalog, not a database seed table.
+- Authentication failure in CLI only: verify root `.env` and exported variables.
+- For a failed live demo, disclose the failure and switch to identified prerecorded
+  evidence; do not imply that the recording proves the current deployment.
+
+## Architecture and deployment guide
+
+See `assets/architecture.svg` and `factory-bootstrap.md` for exact resource,
+identity, budget and repository settings.
+
+### Approval and prerequisites
+
+1. Prefer the local path first. Azure deployment is optional and billable.
+2. Obtain subscription/resource owner approval, permitted region, network/address
+   plan, allowed identities, data retention and a cost estimate from current pricing.
+3. Review the owner scripts and Bicep before running them. Existing scripts target
+   the repository's production topology; they are not generic nonproduction scaffolding.
+4. The owner bootstrap requires authenticated Azure CLI, GitHub CLI and PowerShell,
+   repository administration, and subscription permissions for identities, role
+   assignments, budgets and deployments.
+5. Factory adoption additionally requires the external organization-level kernel
+   required workflow and rulesets. A fork alone does not reproduce enforcement.
+
+### Deployment sequence
+
+1. Run the documented read-only preflight and resolve blocked findings.
+2. Confirm exact subscription, resource names, resource group and permissions with
+   an owner immediately before provisioning; do not run billable steps implicitly.
+3. Run the approved bootstrap described in `factory-bootstrap.md`.
+4. Review GitHub production environment variables and immutable-subject OIDC trust.
+5. Verify private endpoint approval, DNS and App Service VNet integration.
+6. Observe the release controller building an immutable standalone package, applying
+   compatible migrations inside App Service startup, and checking health and orders.
+7. Retain the deployed SHA, GitHub Deployment record, package and probe results.
+   These are required before claiming a verified cloud demo.
+
+No cloud resources were provisioned for this readiness exercise. There is no
+staging slot in the existing topology. A customer pilot must adapt the scripts,
+names, environment and governance for an approved isolated nonproduction target.
+
+### Operating costs and recovery
+
+Review App Service, PostgreSQL compute/storage/backups, private endpoints,
+monitoring ingestion/retention, release storage and network charges. The bootstrap's
+$75 monthly budget raises alerts; it does not cap spending or estimate your bill.
+Set alert recipients and an owner; the reference action group does not establish
+an on-call service. Validate limits against workload and customer requirements.
+
+Application rollback redeploys the previous immutable package. There is no database
+rollback: migrations must be additive and backward-compatible. Database restore,
+backup retention, RPO/RTO, availability-zone failure and restore drills require
+separate customer design and acceptance.
+
+### Owner-reviewed cloud teardown
+
+1. Pause release, signal and factory schedules in the approved demo copy so they
+   cannot reconcile deleted resources back into existence.
+2. Confirm no shared/customer resources; export evidence and retain approved backups.
+3. Have the owner remove only the approved demo resource group after reviewing a
+   complete resource inventory. This is destructive and is not automated here.
+4. Review subscription-scoped budgets/role assignments, OIDC federation and identity,
+   GitHub environment variables and stale deployment records separately.
+5. Check soft-deleted vaults, retained backups, external resources and billing.
+   Resource-group deletion alone is not proof that every charge or permission ended.
+
+## Reusability and customization
+
+| Reusable pattern | Customer customization |
+|---|---|
+| Catalog, cart and validation | Branding, products, currency, accessibility and rights |
+| Server-side pricing and transactional order/items | Inventory, taxes, payments, shipping and identity |
+| Domain/application/infrastructure separation | Enterprise service boundaries and contracts |
+| Parameterized Bicep, managed identity and private endpoints | Names, region, address space, permissions and availability |
+| Health and synthetic lifecycle | SLOs, alert recipients, retention and escalation |
+| Bounded delivery policy and review/attestation | Organization kernel, approvals and governance ownership |
+
+Use the catalog as sample data, the scripts as presenter templates, architecture
+as a trust-boundary pattern, Bicep as reviewed infrastructure starting material,
+and existing workflows as optional delivery examples. Do not claim the catalog
+is rights-cleared or publish a new license without owner approval.
+
+Anonymize screenshots/logs: no production orders, customer emails, bearer tokens,
+confirmation tokens, subscription/tenant IDs, infrastructure names or unrelated
+browser tabs. Keep only the selected synthetic product details and test outcomes.
+
+## Security and support
+
+- The public test-order endpoint has no customer authentication or rate limiting.
+  Before exposure, define abuse controls, resource limits, retention, monitoring
+  and cost ownership. A demo disclaimer is not an abuse control.
+- Input validation and server-side pricing are implemented; these do not constitute
+  a comprehensive security review or payment compliance.
+- Review server exception logging for sensitive details before a customer pilot.
+- Prefer least privilege; review the bootstrap's resource-group Contributor and
+  subscription Cost Management Reader assignments against customer policy.
+- Keep runtime secrets in the approved secret store, not GitHub files or screenshots.
+- Production dependency audit was clean after targeted transitive patches; full
+  development audit still reports the braces/fast-glob/micromatch ESLint dependency
+  chain without an available nonbreaking fix. Do not apply npm's suggested major
+  downgrade of Next.js tooling blindly. Track remediation before external adoption.
+  Reproduce with `npm audit`; the underlying advisory is
+  https://github.com/advisories/GHSA-vfj7-8cjw-p6xm. The production-only audit does
+  not cover development tooling and must not be presented as a clean full audit.
+- General questions: repository issues, with synthetic diagnostics only.
+- Security findings: use GitHub private vulnerability reporting **if enabled**.
+  If unavailable, obtain an owner-approved private channel before sharing details.
+  Do not publish sensitive findings in issues.
+- Repository owners must assign support and security contacts. No maintainer
+  acceptance, maintenance term, response SLA or Microsoft support is implied.
+
+## Customer engagement motion
+
+**Account-team opener:** Could your team demonstrate a complete commerce change,
+from shopping experience to verified order and deployment evidence, without real
+payments or relying on the original developer? Use this reference to identify the
+delivery and integration friction worth solving.
+
+### Discovery questions
+
+1. Who owns storefront changes, and which handoff creates delay?
+2. Which journey must work to make an experiment credible?
+3. Which systems own products, inventory, prices, payments and fulfillment?
+4. What data may enter the demo or pilot?
+5. Which approvals and evidence are required before deployment?
+6. What networking, regional, accessibility and reliability requirements apply?
+7. Which baseline matters: setup effort, change lead time, failures or recovery?
+8. Which controls are required before adopting agent-assisted delivery?
+
+**Workshop:** Map one journey, system dependencies, trust boundaries and acceptance
+criteria. Produce an agreed architecture and bounded pilot backlog.
+
+**Pilot:** Adapt the synthetic catalog and one journey in an approved nonproduction
+environment. Exercise one reviewed change through customer delivery controls.
+
+| Success criterion | Evidence / accountable role |
+|---|---|
+| Another engineer reproduces setup | Rehearsal checklist / platform lead |
+| Cart persists correct order and items | Sanitized database proof / developer |
+| No payment, shipment or customer PII | Test outputs / product owner |
+| Change has validation and deployment trace | Checks, SHA, deployment / platform lead |
+| Recovery and teardown demonstrated safely | Approved exercise / operations owner |
+| Security, cost, rights and support accepted | Named approvals / account and customer owners |
+
+**CTA:** Bring the product owner, platform lead and integration engineer to
+discovery; leave with one pilot journey, a named owner, and acceptance scorecard.
+
+## Readiness gates and catalog handoff
+
+### Demo-ready evidence packaged here
+
+- [x] Customer-oriented README and local setup/configuration template.
+- [x] Existing commands plus real PostgreSQL acceptance and cleanup.
+- [x] Node 22/24 validation and database-backed CI configuration.
+- [x] Architecture, sample data, reset, deployment and recovery guidance.
+- [x] Timed scripts, screenshots, five-minute recording and captions.
+- [x] Discovery kit, support/security boundaries and draft metadata.
+- [ ] Independent second-presenter rehearsal and customer outcome validation.
+
+### Field/catalog approvals still required
+
+- [ ] Owner-approved license, dependency notices and asset-rights review.
+- [ ] Named maintenance/security contacts, escalation and response expectations.
+- [ ] Approved nonproduction Azure deployment and recovery/teardown proof.
+- [ ] Public-exposure abuse controls and customer-specific security assessment.
+- [ ] Remediation/acceptance of outstanding development dependency advisories.
+- [ ] Authoritative catalog schema, taxonomy, validator and contribution process.
+- [ ] Metadata validation, owner sign-off and actual catalog submission/review.
+
+The catalog URL redirected to Microsoft enterprise SSO; unauthenticated README
+and manifest probes and the available GitHub content API returned 404. These
+results do not prove the repository is missing. Obtain authorized access or an
+export of its schema, contribution guide and accepted examples. `accelerator.yaml`
+is deliberately a draft, not a claim of schema compliance or completed submission.

@@ -15,7 +15,9 @@
   <track default kind="captions" src="walkthrough.vtt" srclang="en" label="English">
   Your browser cannot play this video. Download the WebM and read the transcript below.
 </video>
-<p><a href="walkthrough.vtt">Captions / transcript</a> · <a href="../accelerator-guide.mdx">Presenter guide and limitations</a></p>
-<p>Serve the repository locally with <code>python3 -m http.server 8000 --bind 127.0.0.1</code> and open
-<code>http://localhost:8000/docs/assets/walkthrough.html</code> so captions load over HTTP.</p>
+<p><a href="walkthrough.vtt">Captions / transcript</a> · Presenter guide: <code>docs/accelerator-guide.mdx</code> in the repository.</p>
+<p>From the checkout root, serve only the media directory with
+<code>python3 -m http.server 8000 --bind 127.0.0.1 --directory docs/assets</code> and open
+<code>http://localhost:8000/walkthrough.html</code> so captions load over HTTP.
+Do not serve the repository root: it may contain local credentials.</p>
 </html>

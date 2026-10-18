@@ -1,0 +1,66 @@
+# DRAFT: schema and taxonomy are unverified; the target catalog requires enterprise access.
+# Do not submit until mapped to its authoritative schema and owner-approved.
+id: meme-forge
+name: "Meme Forge — Azure Commerce and Governed Delivery Accelerator"
+summary: "Payment-free commerce with PostgreSQL persistence and governed Azure delivery patterns."
+description: >-
+  A Next.js reference storefront connecting catalog selection, server-side pricing,
+  and persisted test orders. Includes Azure infrastructure, local acceptance tests,
+  presenter assets and a customer discovery kit. Payments are disabled and fulfillment
+  is mocked. Agentic capabilities concern software delivery, not runtime shopping AI.
+repository: "https://github.com/The-weyland-yutani-corporation/meme-sticker-e-commerce-store"
+catalog: "https://github.com/mcaps-microsoft/accelerators-catalog"
+status: draft
+schema_verified: false
+readiness: locally-verified-demo-candidate
+target_readiness: catalog-ready
+customer_scope: reusable-cross-industry
+industries: [retail, cross-industry]
+personas: [platform-engineering-lead, developer, product-owner, solution-engineer, cloud-solution-architect]
+scenarios: [commerce-modernization, governed-software-delivery, azure-application-modernization]
+technologies: [Next.js, TypeScript, React, PostgreSQL, Prisma, GitHub Actions, GitHub Agentic Workflows, Azure Bicep]
+azure_services:
+  - Azure App Service
+  - Azure Database for PostgreSQL
+  - Azure Key Vault
+  - Azure Blob Storage
+  - Azure Monitor
+  - Azure Application Insights
+  - Azure Private Link
+capabilities: [product-catalog, shopping-cart, payment-free-order-persistence, database-backed-health, synthetic-order-verification]
+prerequisites:
+  - "Node 22.13+ or Node 24 and npm"
+  - "PostgreSQL 16 for checkout; disposable _test database for acceptance"
+  - "Approved Azure subscription and owner bootstrap for optional cloud deployment"
+  - "External organization governance and repository administration for optional unattended factory"
+assets:
+  readme: README.md
+  guide: docs/accelerator-guide.mdx
+  architecture: docs/assets/architecture.svg
+  desktop: docs/assets/storefront-desktop.png
+  mobile: docs/assets/storefront-mobile.png
+  cart: docs/assets/cart.png
+  confirmation: docs/assets/checkout.png
+  persistence: docs/assets/persistence.png
+  recording: docs/assets/walkthrough.webm
+  captions: docs/assets/walkthrough.vtt
+  evidence: docs/assets/evidence.json
+engagement:
+  offer: "Commerce and governed-delivery discovery workshop"
+  pilot: "Adapt one synthetic journey in approved nonproduction infrastructure"
+  outcome: "Verified order journey and traceable change-to-deployment evidence"
+limitations:
+  - "Next.js canary dependency; no stable-only stack claim"
+  - "No active payments, real fulfillment, customer identity or inventory integration"
+  - "Generic confirmation page does not independently verify persistence"
+  - "Local evidence does not prove a live Azure deployment"
+  - "Current Azure topology has no staging slot; application rollback does not undo migrations"
+  - "Public checkout abuse controls require pilot-specific assessment"
+  - "Development dependency advisories remain; production audit is clean at capture"
+submission_requirements_pending:
+  - catalog-schema-taxonomy-and-contribution-validation
+  - approved-license-and-asset-rights
+  - named-maintainer-and-private-security-contact
+  - independent-demo-rehearsal
+  - approved-cloud-deployment-and-recovery-evidence
+  - customer-specific-security-and-support-acceptance

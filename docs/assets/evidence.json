@@ -1,0 +1,56 @@
+{
+  "captured_at": "2026-10-18T18:07:20.628Z",
+  "application_source_commit": "d5266d4528ca64590027e0e079b5c14c82a13b42",
+  "environment": "Local production build; disposable PostgreSQL 16; no Azure deployment performed",
+  "node": "v22.23.3",
+  "browser": "Chromium headless; Chrome DevTools Protocol",
+  "reference_cart": {
+    "amount_total_cents": 998,
+    "item_count": 2
+  },
+  "persisted_rows": [
+    {
+      "amountTotal": 998,
+      "currency": "usd",
+      "status": "FULFILLMENT_PENDING",
+      "checkoutMode": "PAYMENT_FREE",
+      "productName": "Senior Duck Engineer",
+      "quantity": 1,
+      "unitAmount": 549
+    },
+    {
+      "amountTotal": 998,
+      "currency": "usd",
+      "status": "FULFILLMENT_PENDING",
+      "checkoutMode": "PAYMENT_FREE",
+      "productName": "Ship It",
+      "quantity": 1,
+      "unitAmount": 449
+    }
+  ],
+  "health": {
+    "status": "ok",
+    "service": "meme-sticker-store",
+    "version": "d5266d4528ca64590027e0e079b5c14c82a13b42",
+    "timestamp": "2026-10-18T18:07:20.626Z"
+  },
+  "checks": {
+    "node22": "Lint, typecheck, 37 unit tests, 4 database tests, 100% domain coverage, production build passed",
+    "node24": "Lint, typecheck, 37 unit tests, 4 database tests, 100% domain coverage, production build passed",
+    "production_audit": "0 vulnerabilities after sharp/source-map-js patches",
+    "development_audit": "5 high-severity findings in ESLint braces/fast-glob/micromatch dependency chain remain",
+    "browser": "HTTP checkout, live database verification, desktop/mobile capture, keyboard Enter add/close, and no horizontal overflow at 390px passed; not a full accessibility audit"
+  },
+  "recording": {
+    "duration_seconds": 300,
+    "frames_per_second": 1,
+    "audio": false,
+    "captions": "walkthrough.vtt",
+    "note": "Real browser capture; presenter evidence panel uses live database read, not a new application feature"
+  },
+  "limitations": [
+    "No remote CI or cloud deployment claimed",
+    "Generic confirmation page does not verify persistence",
+    "Independent presenter rehearsal, license, rights, ownership and catalog acceptance remain pending"
+  ]
+}
