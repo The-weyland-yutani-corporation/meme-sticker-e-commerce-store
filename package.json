@@ -13,7 +13,7 @@
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -47,5 +47,8 @@
   },
   "overrides": {
     "deepmerge-ts": "^8.0.0"
+  },
+  "engines": {
+    "node": "^22.13.0 || ^24.0.0"
   }
 }

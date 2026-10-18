@@ -120,6 +120,9 @@ export function Storefront({ products }: { products: readonly Product[] }) {
       </header>
 
       <main id="top">
+        <p className="demo-notice" role="note">
+          Reference demo · No payment collected · Fulfillment is mocked; no physical shipment.
+        </p>
         <section className="hero">
           <div className="hero-copy">
             <p className="eyebrow">

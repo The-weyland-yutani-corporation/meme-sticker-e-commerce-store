@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { getPrisma } from "../src/infrastructure/db";
 
-const prisma = new PrismaClient();
+const prisma = getPrisma();
 
 async function main() {
   await prisma.$queryRaw`SELECT 1`;
