@@ -21,9 +21,14 @@ function createPrismaClient() {
 export function getPrisma(): PrismaClient {
   const client = globalForPrisma.prisma ?? createPrismaClient();
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
-  }
+  // Always memoize the client (not just outside production). Previously the
+  // singleton was only cached in non-production environments, so every
+  // production invocation (including the ~15-minute release-health probe)
+  // constructed a brand-new PrismaClient with its own connection pool that
+  // was never closed. That connection leak exhausted PostgreSQL's
+  // max_connections over time, which surfaced as the health endpoint
+  // returning HTTP 503 indefinitely.
+  globalForPrisma.prisma = client;
 
   return client;
 }
